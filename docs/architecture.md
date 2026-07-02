@@ -4,7 +4,6 @@ Status: draft — Phase 1 (conversational agent only)
 
 ## 1. High-level shape
 
-```
                       ┌─────────────────────────┐
                       │   Orchestrator Agent     │
                       │  (conversational, stateful│
@@ -13,47 +12,43 @@ Status: draft — Phase 1 (conversational agent only)
                                   │
         ┌─────────────┬──────────┼──────────────┬─────────────┐
         ▼             ▼          ▼              ▼             ▼
-  trip-context   charging-   park-logistics  food/restaurant  (future
-     skill       planner        skill           lookup        skills)
-   (static data)  skill      (NPS, weather)   (MCP: Places)
+   trip-context   charging-   park-logistics   food-lookup    (future
+    data tool     planner       sub-agent       sub-agent     agents)
+  (static data)  sub-agent    (NPS, weather)   (MCP: Places)
+                 (Task mode)   (AgentTool)
                 (MCP: maps,
                  charger APIs)
 ```
 
-The orchestrator is a single conversational agent. It does not run
-continuously — it answers in response to user turns. Each turn:
+The orchestrator is the root conversational agent. It coordinates sub-agents and tools to answer user queries:
 
-1. Reads fixed trip context (via `trip-context` skill) to know where we are
+1. Reads fixed trip context (via `trip-context` tool) to know where we are
    in the trip (date, current/next accommodation, group split status).
-2. Determines which dynamic skill(s) are relevant to the question.
-3. Calls the relevant skill(s), which call MCP servers for live data.
+2. Determines which sub-agent(s) or tools are relevant to the question.
+3. Invokes the sub-agent(s) via Task Delegation or AgentTool, which call MCP servers for live data.
 4. Synthesizes a single answer, scoped to "today" or the specific question
    — never silently re-planning the whole 8-day trip.
 
-## 2. Agent / Skill boundary
+## 2. Multi-Agent Boundaries
 
-**Skills** = domain knowledge + decision rules + how to call the right
-tools. They are mostly prompt/markdown + light logic, not full agents.
+**Sub-agents** = intelligent, specialized agents with focused instructions, constraints, and tools. They perform task routing or return structured information.
 
-**Orchestrator** = the only thing holding conversational state and making
-the call on which skill(s) to invoke. In Phase 1 there is exactly one
-orchestrator — no subagent-to-subagent delegation yet. This keeps the
-debugging surface small while still exercising the Skills + MCP concepts.
+**Orchestrator** = the root agent that holds conversational state, delegates tasks to sub-agents, and merges/synthesizes their outputs.
 
 | Component | Type | Responsibility |
 |---|---|---|
-| trip-context | Skill (static) | Source of truth for bookings/dates/group |
-| charging-planner | Skill + MCP | Tesla range/charging logic given location + battery |
-| park-logistics | Skill + MCP | NPS road/trail status, weather-aware hike suggestions |
-| food-lookup | Skill + MCP | Restaurant search en route (Google Places) |
-| Orchestrator | Agent | Routes queries, merges results, keeps "today" state |
+| trip-context | Tool (static) | Source of truth for bookings/dates/group |
+| charging-planner | Sub-agent (Task Mode) | Tesla range/charging logic and Supercharger routing |
+| park-logistics | Sub-agent (AgentTool) | NPS road/trail status, weather-aware hike suggestions |
+| food-lookup | Sub-agent/Tool | Restaurant search en route (Google Places) |
+| Orchestrator | Root Agent | Coordinates sub-agents, routes queries, keeps "today" state |
 
 ## 3. MCP servers (Phase 1 candidates)
 
 | MCP server | Purpose | Notes |
 |---|---|---|
-| Maps/Routing (e.g. Google Maps) | Drive time, traffic, route polylines | Needed by charging + food skills |
-| Weather (NWS/NOAA or similar) | Current + short-term forecast | Needed by park-logistics |
+| Maps/Routing (e.g. Google Maps) | Drive time, traffic, route polylines | Needed by charging + food sub-agents |
+| Weather (NWS/NOAA or similar) | Current + short-term forecast | Needed by park-logistics sub-agent |
 | NPS data | Road/trail status, alerts | NPS publishes a public API; need to verify current alert granularity |
 | Tesla | Live SOC/location (optional) | Community MCP servers exist; could also start with manual "current battery %" input from the user rather than live telemetry, to reduce auth complexity in Phase 1 |
 | Google Places | Restaurant search en route | Already used in our other tooling patterns |
@@ -62,7 +57,7 @@ debugging surface small while still exercising the Skills + MCP concepts.
 highest-auth-complexity integration. Recommend starting with the user
 manually reporting battery % and location in chat, and only build the
 Tesla MCP integration once the rest of the pipeline (charging-planner
-skill logic, MCP plumbing pattern) is proven out with the other servers.
+sub-agent logic, MCP plumbing pattern) is proven out with the other servers.
 
 ## 4. Data flow example
 
@@ -70,13 +65,13 @@ skill logic, MCP plumbing pattern) is proven out with the other servers.
 Glacier today — where should we charge and is there anything worth
 stopping for?"
 
-1. Orchestrator → `trip-context` skill: confirms today is a transition day
+1. Orchestrator → `trip-context` tool: confirms today is a transition day
    (Gardiner → West Glacier KOA), checks group-split note (not yet in
    effect until Jul 23).
-2. Orchestrator → `charging-planner` skill: given start location, 70%
+2. Orchestrator → `charging-planner` sub-agent: given start location, 70%
    battery, destination → calls Maps MCP for route, evaluates whether a
    Supercharger stop is needed en route or arrival SOC is sufficient.
-3. Orchestrator → `park-logistics` skill: checks if route passes near any
+3. Orchestrator → `park-logistics` sub-agent: checks if route passes near any
    open trails/viewpoints worth a stop, using NPS + Weather MCP.
 4. Orchestrator merges: one answer — charging stop (if needed) + 1-2
    worthwhile stops — scoped to today only.

@@ -2,94 +2,107 @@
 
 ## Purpose
 
-Defines the **fixed, unchangeable** trip data that every other agent/skill
-treats as ground truth. This data is never "replanned" — it's the
-scaffolding the dynamic agents plan around.
+Defines the **fixed, unchangeable** trip data that every other agent treats as ground truth. This data is never "replanned" — it's the scaffolding the dynamic agents plan around.
 
 ## Scope
 
-- Trip dates and overall route
-- Group composition and vehicle
-- Accommodation bookings (dates, location, address, who's staying where)
-- Known hard constraints (e.g. intentional group split, overnight drive)
+- Trip dates, overall route, and timezone changes.
+- Group composition (families, cars, travel methods).
+- Accommodation bookings (dates, location, address, who's staying where).
+- Known hard constraints (e.g., intentional group split, shared vs. split accommodations, overnight drive).
 
-## Data model (draft — refine during implementation)
+## Data Model
 
 ```yaml
 trip:
   dates: "2026-07-18 to 2026-07-25 (+ overnight drive home 07-25/07-26)"
   origin: "Santa Clara, CA"
+  timezones:
+    origin_base: "Pacific Time (PT)"
+    destination_base: "Mountain Time (MT)"
+    notes: "Santa Clara is in PT. Idaho (Driggs), Wyoming (Grand Teton/Jackson Hole), and Montana (Yellowstone/Gardiner/Glacier/Kalispell) are in MT. Crossing between CA/NV and ID/WY/MT incurs a 1-hour shift (MT = PT + 1 hour)."
+  
   group:
-    - name: Rama
+    - name: Family 1
       role: primary
       family: [spouse, son (13), daughter (9)]
-    - name: Sayanna
+      vehicle: "2023 Tesla Model Y Long Range (Electric)"
+      travel_mode: "Driving from Santa Clara, CA on July 18th"
+      
+    - name: Family 2
       role: companion
-    - name: JPR
+      family: [spouse, child_1, child_2]
+      vehicle: "Rented Gas Car (from JAC Airport)"
+      travel_mode: "Flying to Jackson Hole (JAC) on July 18th, renting a gas car, driving to Driggs, ID"
+      
+    - name: Family 3
       role: companion
-  vehicle:
-    make_model: "2023 Tesla Model Y Long Range"
+      family: [spouse, child_1, child_2]
+      vehicle: "Rented Gas Car (from JAC Airport)"
+      travel_mode: "Flying to Jackson Hole (JAC) on July 18th, renting a gas car, driving to Driggs, ID"
 
 accommodations:
   - dates: ["2026-07-18", "2026-07-20"]
     type: airbnb
     location: "Driggs, ID"
     address: "823 Booshway Street, Driggs, ID 83422"
-    occupants: [Rama, family]
+    occupants: [Family 1 & family, Family 2 & family, Family 3 & family]
+    note: "Shared by all 3 families (12 people total)"
 
   - dates: ["2026-07-20", "2026-07-22"]
     type: campground
     name: "WestGate KOA"
     address: "3305 Targhee Pass Highway, West Yellowstone, MT 59758"
-    occupants: [Rama, family]
+    occupants: [Family 1 & family, Family 2 & family, Family 3 & family]
+    note: "Shared by all 3 families (12 people total)"
 
   - dates: ["2026-07-22", "2026-07-23"]
     type: airbnb
     location: "Gardiner, MT"
-    occupants: [Rama, family]
+    occupants: [Family 1 & family, Family 2 & family, Family 3 & family]
+    note: "Shared by all 3 families (12 people total)"
 
   - dates: ["2026-07-23", "2026-07-25"]
     type: campground
     name: "West Glacier NP KOA"
     address: "355 Halfmoon Flats Road, West Glacier, MT 59936"
-    occupants: [Rama, family]
-    note: "Intentional split from Sayanna/JPR — different lodging, same days"
+    occupants: [Family 1 & family]
+    note: "Split lodging - Family 1 stays here"
 
   - dates: ["2026-07-23", "2026-07-25"]
     type: airbnb
     location: "Kalispell, MT"
     address: "147 Cyclone Drive, Kalispell, MT 59901"
-    occupants: [Sayanna, JPR]
+    occupants: [Family 2 & family, Family 3 & family]
+    note: "Split lodging - Family 2 & Family 3 stay here"
 
   - dates: ["2026-07-25", "2026-07-26"]
     type: none
-    note: "Overnight drive: West Glacier, MT -> Santa Clara, CA. No lodging."
+    note: "Overnight drive home: West Glacier, MT -> Santa Clara, CA. No lodging."
 ```
 
-## Outputs this spec provides to other agents/skills
+## Outputs this Spec Provides to Other Agents
 
-- `current_base(date, time)` → which accommodation/location is "home base"
-  for a given moment in the trip.
-- `is_group_together(date)` → boolean + which subgroup is where (relevant
-  Jul 23–25 when the group splits).
-- `trip_day_index(date)` → which day of the 8-day trip this is, used to
-  scope "remainder of today" replanning.
-- Hard constraints list, e.g. "no lodging booked night of Jul 25 —
-  overnight drive is intentional, not a gap to fill."
+- `current_base(date, time)` → which accommodation/location is "home base" for a given moment.
+- `is_group_together(date)` → boolean indicating if the 3 families are sharing lodging/base or if they are split (returns True Jul 18-23, False Jul 23-25).
+- `trip_day_index(date)` → day of the 8-day trip (1 to 8).
+- `timezone_for_location(location)` → returns "PT" or "MT" based on state/location coordinates.
+- Hard constraints list (e.g., no lodging on the night of July 25th due to the overnight drive home).
 
-## Edge cases / decision rules
+## Edge Cases / Decision Rules
 
-- If a query falls on a transition day (e.g. Jul 20, Jul 22, Jul 23), the
-  context must surface **both** the checkout location/time and the next
-  check-in location/time, since drive planning spans both.
-- Jul 23–25: any plan involving "the group" must account for two separate
-  physical locations (West Glacier vs. Kalispell) — roughly 25-30 min apart.
-- This data is read-only to all other agents. Any change to bookings is a
-  manual edit to this spec/file, never an agent-driven action.
+- **Time Zone Crossing**:
+  - The driving route from Santa Clara (PT) to Driggs, ID (MT) crosses into Mountain Time. Arrival planning at Driggs on July 18th must account for losing 1 hour.
+  - The return drive from West Glacier (MT) to Santa Clara (PT) on July 25th crosses back into Pacific Time, gaining 1 hour.
+- **Accommodation Sharing**:
+  - July 18–23: All 3 families stay at the same location. Any dinner bookings, departures, or group activity plans must coordinate for 12 people.
+  - July 23–25: The group splits. Family 1 stays at West Glacier KOA, while Family 2/Family 3 stay at Kalispell (approx. 25-30 mins apart). Plans must handle separate coordinates and logistics.
+- **Vehicle Differences**:
+  - Family 1 travels in a Tesla Model Y (requires EV charging routing).
+  - Family 2 and Family 3 travel in separate rental gas vehicles (require normal route times, no Supercharging stops).
+- **Manual Data Override**: This data is read-only. Updates to dates, group members, or accommodations must be done manually.
 
 ## Non-goals
 
-- This spec does not include day-by-day activity plans — that's dynamic
-  and lives in the orchestrator's working state, not here.
-- Does not include real-time location tracking of the vehicle/group
-  (that's a Phase 2 concern if pursued at all).
+- Day-by-day activity plans (handled by the orchestrator).
+- Real-time location tracking of the vehicle/group.

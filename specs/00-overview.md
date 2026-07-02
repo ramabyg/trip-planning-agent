@@ -21,26 +21,21 @@ Example questions the agent should be able to answer:
    live conditions — not the whole 8-day trip from scratch.
 2. Clear separation of **fixed facts** (never replanned) vs. **dynamic
    variables** (replanned per query).
-3. Use this project to gain hands-on exposure to: Skills, MCP servers,
-   multi-agent/orchestrator patterns, and SDD as a workflow.
+3. Use this project to gain hands-on exposure to: Multi-Agent Systems, MCP servers,
+   Task Delegation, Agent as a Tool patterns, and SDD as a workflow.
 4. Two genuinely safety/trip-critical data sources prioritized first:
    **NPS road/trail status** and **Tesla charging network reliability**.
 
 ## Non-goals (Phase 1)
 
 - No proactive/background agent that watches location and pushes alerts
-  unprompted. (Deferred to Phase 2.)
-- No mobile app / native UI. Phase 1 is a conversational interface only
-  (e.g. Claude Code, Claude.ai, or a simple chat CLI).
-- No multi-user real-time sync between Rama's and Sayanna/JPR's instances
-  of the agent (each runs independently for Phase 1).
-- No persistent learning/memory across trips — this is scoped to the one
-  trip's date range (July 18–25, 2026).
+- No mobile app / native UI. Phase 1 is a conversational interface only.
+- No multi-user real-time sync between Family 1's and Family 2/3's instances of the agent.
+- No persistent learning/memory across trips — this is scoped to the one trip's date range (July 18–25, 2026).
 
 ## Fixed facts (source of truth — see `specs/01-trip-context.md`)
 
-- Group: Rama (+ family of 4), traveling with Sayanna and JPR for part of
-  the trip.
+- Group: Family 1 (+ family of 4), traveling with Family 2 and Family 3 for part of the trip.
 - Vehicle: 2023 Tesla Model Y Long Range.
 - Accommodation bookings and dates (immutable once booked).
 - Park entry points and overall route direction.
@@ -59,9 +54,9 @@ Example questions the agent should be able to answer:
 |---|---|
 | `00-overview.md` | This document — problem, goals, scope |
 | `01-trip-context.md` | Fixed trip data model (bookings, dates, group, vehicle) |
-| `02-charging-agent.md` | Charging planner skill/agent spec |
-| `03-park-logistics.md` | NPS roads, trails, weather skill/agent spec |
-| `04-orchestrator.md` | Conversational orchestrator agent spec |
+| `02-charging-agent.md` | Charging planner sub-agent spec (Task Mode) |
+| `03-park-logistics.md` | Park logistics sub-agent spec (Agent as a Tool) |
+| `04-orchestrator.md` | Conversational orchestrator agent spec (Root Agent) |
 
 ## SDD conventions for this project
 

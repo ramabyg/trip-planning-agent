@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yellowstone Trip Agent — Dashboard</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Premium Icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <!-- Marked.js for markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Sidebar: Trip Timeline & Constraints -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="brand">
+                    <i class="fa-solid fa-compass-drafting brand-icon"></i>
+                    <div>
+                        <h1>Yellowstone Agent</h1>
+                        <span class="trip-dates">July 18 – 25, 2026</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Vehicle & Group Context (Static) -->
+            <section class="context-panel">
+                <div class="section-title">
+                    <i class="fa-solid fa-car-side"></i>
+                    <h2>Trip Specs</h2>
+                </div>
+                <div class="spec-grid">
+                    <div class="spec-card">
+                        <span class="spec-label">Vehicle</span>
+                        <span class="spec-value">Tesla Model Y LR</span>
+                    </div>
+                    <div class="spec-card">
+                        <span class="spec-label">Group size</span>
+                        <span class="spec-value">6 occupants</span>
+                    </div>
+                    <div class="spec-card">
+                        <span class="spec-label">Origin</span>
+                        <span class="spec-value">Santa Clara, CA</span>
+                    </div>
+                    <div class="spec-card" id="group-split-card">
+                        <span class="spec-label">Group Split</span>
+                        <span class="spec-value text-accent">Jul 23 - 25</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 8-Day Interactive Timeline -->
+            <section class="timeline-panel">
+                <div class="section-title">
+                    <i class="fa-solid fa-calendar-days"></i>
+                    <h2>8-Day Timeline</h2>
+                </div>
+                <div class="timeline-list" id="timeline-list">
+                    <!-- Loaded dynamically via JS -->
+                </div>
+            </section>
+        </aside>
+
+        <!-- Main Panel -->
+        <main class="main-panel">
+            <!-- Left Panel: Chat Interface -->
+            <section class="chat-section">
+                <div class="panel-header">
+                    <div class="panel-title-wrapper">
+                        <div class="status-indicator online"></div>
+                        <h2>Conversational Planner</h2>
+                    </div>
+                    <div class="model-badge">Gemini 2.5 Pro</div>
+                </div>
+                
+                <div class="chat-messages" id="chat-messages">
+                    <div class="message agent">
+                        <div class="message-content">
+                            <p>Welcome, Family 1! 🏔️ I am your Yellowstone Road Trip Assistant.</p>
+                            <p>I have loaded your immutable bookings from the trip context. Tell me: where are we starting, what's your current Tesla battery SOC, and what planning question can I answer for you today?</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chat-input-container">
+                    <div class="input-controls">
+                        <div class="soc-pill">
+                            <i class="fa-solid fa-battery-three-quarters"></i>
+                            <input type="number" id="current-soc" value="80" min="10" max="100" title="Starting Battery SOC %">
+                            <span>% SOC</span>
+                        </div>
+                        <input type="text" id="user-input" placeholder="Ask about routes, Tesla charging, park status, or restaurants...">
+                        <button id="send-btn" class="send-btn" title="Send Message">
+                            <i class="fa-solid fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Panel: Live HUD Monitor -->
+            <section class="monitor-section">
+                <div class="panel-header">
+                    <i class="fa-solid fa-chart-line header-icon"></i>
+                    <h2>Live Trip Monitor</h2>
+                </div>
+
+                <div class="monitor-grid">
+                    <!-- HUD Card: Vehicle & Battery -->
+                    <div class="monitor-card hud-card">
+                        <h3>Vehicle Status</h3>
+                        <div class="battery-wrapper">
+                            <div class="battery-gauge">
+                                <div class="battery-level" id="hud-battery-level" style="width: 80%;"></div>
+                                <span class="battery-percentage" id="hud-battery-percent">80%</span>
+                            </div>
+                            <div class="battery-range">
+                                <span class="range-value" id="hud-range-miles">208</span>
+                                <span class="range-unit">mi range</span>
+                            </div>
+                        </div>
+                        <div class="hud-stats">
+                            <div>
+                                <span class="stat-lbl">Safety Limit</span>
+                                <span class="stat-val font-warning">10% SOC</span>
+                            </div>
+                            <div>
+                                <span class="stat-lbl">Consumption</span>
+                                <span class="stat-val">280 Wh/mi</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- HUD Card: Active Day Planner -->
+                    <div class="monitor-card location-card">
+                        <h3>Active Day details</h3>
+                        <div class="active-location-flow">
+                            <div class="location-point">
+                                <i class="fa-solid fa-circle-arrow-up text-primary"></i>
+                                <div>
+                                    <span class="point-lbl">Origin</span>
+                                    <span class="point-val" id="hud-day-origin">Santa Clara, CA</span>
+                                </div>
+                            </div>
+                            <div class="location-point">
+                                <i class="fa-solid fa-circle-arrow-down text-accent"></i>
+                                <div>
+                                    <span class="point-lbl">Destination tonight</span>
+                                    <span class="point-val" id="hud-day-destination">Driggs, ID</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="occupant-alert" id="hud-group-status">
+                            <i class="fa-solid fa-users"></i>
+                            <span>Group together</span>
+                        </div>
+                    </div>
+
+                    <!-- HUD Card: NPS Advisories -->
+                    <div class="monitor-card alerts-card">
+                        <h3>Park Advisories & Closures</h3>
+                        <div class="advisories-list" id="hud-advisories">
+                            <div class="advisory-item info">
+                                <i class="fa-solid fa-info-circle"></i>
+                                <div>
+                                    <h4>No Park Selected</h4>
+                                    <p>Select a timeline day or ask the assistant about a park to fetch active NPS alerts.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- HUD Card: Cloud Upload & Share Hub -->
+                    <div class="monitor-card upload-card">
+                        <h3>Cloud Synchronization</h3>
+                        <p class="upload-desc">Save the active day's planned itinerary to Google Cloud Storage to share with the group.</p>
+                        <div class="upload-actions">
+                            <button id="upload-btn" class="action-btn upload">
+                                <i class="fa-solid fa-cloud-arrow-up"></i> Sync active Plan to GCS
+                            </button>
+                        </div>
+                        <div class="upload-status" id="upload-status">
+                            <!-- Populated on GCS Sync -->
+                            <div class="empty-sync">
+                                <i class="fa-solid fa-cloud-sun"></i>
+                                <span>No active sync. Ask the agent to "save this plan" or click Sync above.</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
