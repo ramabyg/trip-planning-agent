@@ -228,11 +228,17 @@ async function sendMessage() {
     // Add temporary thinking bubble
     const msgDiv = document.createElement('div');
     msgDiv.className = 'message agent';
-    msgDiv.innerHTML = '<div class="message-content"><i class="fa-solid fa-spinner fa-spin"></i> Thinking...</div>';
+    msgDiv.innerHTML = `
+        <div class="message-content">
+            <i class="fa-solid fa-spinner fa-spin"></i> 
+            <span id="spinner-status" style="margin-left: 8px;">Agent initializing...</span>
+        </div>
+    `;
     chatMessages.appendChild(msgDiv);
     chatMessages.scrollTop = chatMessages.scrollHeight;
     
     let currentMessageText = '';
+    let currentMessageDiv = null;
     
     try {
         const response = await fetch('/run_sse', {
@@ -247,17 +253,17 @@ async function sendMessage() {
             })
         });
         
-        msgDiv.remove();
-        
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
+        let buffer = '';
         
         while (true) {
             const { value, done } = await reader.read();
             if (done) break;
             
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n');
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // Keep partial line in buffer
             
             for (const line of lines) {
                 if (line.startsWith('data: ')) {
@@ -271,25 +277,92 @@ async function sendMessage() {
             }
         }
         
-        // Final message display
+        // Process residual buffer
+        if (buffer && buffer.startsWith('data: ')) {
+            try {
+                const data = JSON.parse(buffer.substring(6));
+                processEvent(data);
+            } catch (e) {}
+        }
+        
+        // Remove the spinner if it was never removed (e.g. empty response)
+        removeSpinner();
+        
+        // Finalize links
         if (currentMessageText) {
-            appendMessage('agent', currentMessageText);
-            
-            // Check if response contains GCS signed URL and update HUD panel
             checkForGcsLink(currentMessageText);
         }
         
     } catch (error) {
         console.error('Error sending message:', error);
+        removeSpinner();
         msgDiv.innerHTML = '<div class="message-content">Error: Could not connect to trip planning agent.</div>';
     }
     
+    const renderedToolCalls = new Set();
+    const renderedToolResults = new Set();
+
+    function removeSpinner() {
+        if (msgDiv && msgDiv.parentNode) {
+            msgDiv.remove();
+        }
+    }
+
+    function updateSpinnerStatus(status) {
+        const statusEl = msgDiv.querySelector('#spinner-status');
+        if (statusEl) {
+            statusEl.textContent = status;
+        }
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    
+    function mergeStrings(s1, s2) {
+        if (!s1) return s2;
+        if (!s2) return s1;
+        if (s1.includes(s2)) return s1;
+        
+        // Find the longest suffix of s1 that matches the prefix of s2
+        for (let len = Math.min(s1.length, s2.length); len > 0; len--) {
+            if (s1.slice(-len) === s2.slice(0, len)) {
+                return s1 + s2.slice(len);
+            }
+        }
+        return s1 + s2;
+    }
+    
+    function updateStreamingMessage(text) {
+        removeSpinner();
+        if (!currentMessageDiv) {
+            currentMessageDiv = document.createElement('div');
+            currentMessageDiv.className = 'message agent';
+            chatMessages.appendChild(currentMessageDiv);
+        }
+        currentMessageDiv.innerHTML = `<div class="message-content">${processText(text)}</div>`;
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    
     function processEvent(event) {
+        // Skip accumulated final model events to avoid duplication
+        if (event.partial === false) {
+            return;
+        }
+        
         if (event.content && event.content.parts) {
             event.content.parts.forEach(part => {
                 if (part.functionCall) {
                     const args = JSON.stringify(part.functionCall.args);
-                    appendMessage('agent-thought', `🛠️ Tool Call: ${part.functionCall.name}(${args})`);
+                    const callStr = `${part.functionCall.name}(${args})`;
+                    if (!renderedToolCalls.has(callStr)) {
+                        renderedToolCalls.add(callStr);
+                        appendMessage('agent-thought', `🛠️ Tool Call: ${callStr}`);
+                    }
+                    
+                    let stage = "Running task...";
+                    if (part.functionCall.name === 'get_trip_context') stage = "Checking bookings database...";
+                    else if (part.functionCall.name === 'charging_planner') stage = "Calculating EV battery range & Superchargers...";
+                    else if (part.functionCall.name === 'park_logistics') stage = "Querying NPS road alerts & weather...";
+                    else if (part.functionCall.name === 'save_and_upload_trip_plan') stage = "Uploading plan itinerary to GCS...";
+                    updateSpinnerStatus(stage);
                     return;
                 }
                 
@@ -301,16 +374,27 @@ async function sendMessage() {
                     } else if (resp) {
                         resultText = JSON.stringify(resp);
                     }
-                    appendMessage('agent-thought', `📥 Tool Result: ${resultText}`);
+                    
+                    const resultKey = `${part.functionResponse.name}-${resultText}`;
+                    if (!renderedToolResults.has(resultKey)) {
+                        renderedToolResults.add(resultKey);
+                        appendMessage('agent-thought', `📥 Tool Result: ${resultText}`);
+                    }
+                    
+                    let stage = "Processing response...";
+                    if (part.functionResponse.name === 'get_trip_context') stage = "Itinerary bookings loaded. Planning next step...";
+                    else if (part.functionResponse.name === 'charging_planner') stage = "Tesla route segments calculated. Optimizing stops...";
+                    else if (part.functionResponse.name === 'park_logistics') stage = "NPS data loaded. Analyzing alerts...";
+                    else if (part.functionResponse.name === 'save_and_upload_trip_plan') stage = "Plan synchronized to GCS successfully.";
+                    updateSpinnerStatus(stage);
                     return;
                 }
                 
                 if (part.text) {
                     const hasToolCall = event.content.parts.some(p => p.functionCall);
-                    if (hasToolCall) {
-                        appendMessage('agent-thought', part.text);
-                    } else {
-                        currentMessageText += part.text;
+                    if (!hasToolCall) {
+                        currentMessageText = mergeStrings(currentMessageText, part.text);
+                        updateStreamingMessage(currentMessageText);
                     }
                 }
             });
