@@ -6,3 +6,4 @@ fastapi
 uvicorn
 pillow
 pyyaml
+opentelemetry-instrumentation-google-genai

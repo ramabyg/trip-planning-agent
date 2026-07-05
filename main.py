@@ -1,13 +1,27 @@
 import os
+import logging
 from google.adk.cli.fast_api import get_fast_api_app
 from fastapi.staticfiles import StaticFiles
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse
 import tools
 
-# Create the standard ADK app in headless mode (web=False)
+# Configure logging to print agent execution details to the terminal
+logging.basicConfig(level=logging.INFO)
+logging.getLogger("google_adk").setLevel(logging.INFO)
+
+# Create the standard ADK app with the developer web playground enabled (web=True)
 # auto_create_session=True is CRITICAL for custom UIs that generate random session IDs.
-app = get_fast_api_app(agents_dir=".", web=False, auto_create_session=True)
+app = get_fast_api_app(agents_dir=".", web=True, auto_create_session=True)
+
+# Initialize OpenTelemetry instrumentation for Google GenAI SDK to collect local traces.
+# This MUST run after get_fast_api_app, which configures the global TracerProvider.
+try:
+    from opentelemetry.instrumentation.google_genai import GoogleGenAiSdkInstrumentor
+    GoogleGenAiSdkInstrumentor().instrument()
+except ImportError:
+    logging.getLogger("main").warning("GoogleGenAiSdkInstrumentor could not be imported; traces will be disabled.")
+
 
 # Mount custom static files
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -17,9 +31,6 @@ os.makedirs(static_dir, exist_ok=True)
 tmp_dir = os.path.join(script_dir, "tmp")
 os.makedirs(tmp_dir, exist_ok=True)
 
-@app.get("/")
-async def redirect_to_ui():
-    return RedirectResponse(url="/ui/")
 
 @app.get("/ui/")
 async def get_ui_index():
