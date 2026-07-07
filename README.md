@@ -32,14 +32,40 @@ yellowstone-trip-agent/
 ├── docs/
 │   └── architecture.md  # System architecture (agents, data flow, tool boundaries)
 ├── agent.py            # Orchestrator and sub-agent definitions
+├── schemas.py          # Pydantic output contracts (ChargingPlan)
 ├── tools.py            # Shared tools & MCP wrappers
+├── maps_client.py      # Direct Routes/Places REST access for deterministic planning
 ├── main.py             # FastAPI entry point / ADK app setup
+├── tests/              # Unit (offline) + integration (live, keys-gated) suites
+├── scripts/            # run_checks.py — pre-commit verification
 └── README.md
+```
+
+## Testing
+
+See `specs/05-testing.md` for the full strategy.
+
+```bash
+pip install -r requirements-dev.txt
+
+pytest                              # offline unit tests (default)
+pytest -m integration               # live API tests (needs MAPS_API_KEY / NPS_API_KEY in .env)
+python scripts/run_checks.py        # commit gate: import sanity + unit tests
+python scripts/run_checks.py --all  # everything
+```
+
+Enable the pre-commit hook once per clone so failing checks block commits:
+
+```bash
+git config core.hooksPath .githooks
 ```
 
 ## Status
 
-🚧 Early architecture / spec phase. No implementation yet.
+✅ Phase 1a: conversational agent with a task-mode charging planner
+(deterministic routing/SOC math, structured `ChargingPlan` output), scoped MCP
+toolsets, mock-data disclosure, and an offline + live test suite with a
+pre-commit verification gate.
 
 ## Phase 1 scope (current)
 

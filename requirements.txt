@@ -1,4 +1,4 @@
-google-adk==1.28.0
+google-adk==2.3.0
 python-dotenv
 google-genai
 google-cloud-storage

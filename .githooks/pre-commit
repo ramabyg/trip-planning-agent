@@ -1,0 +1,25 @@
+#!/bin/sh
+# Blocks the commit unless offline verification passes.
+# Enable once with: git config core.hooksPath .githooks
+
+echo "Running pre-commit verification (scripts/run_checks.py)..."
+
+# Prefer the project venv so the hook works regardless of shell activation.
+if [ -x ".venv/Scripts/python.exe" ]; then
+    PYTHON=".venv/Scripts/python.exe"       # Windows venv
+elif [ -x ".venv/bin/python" ]; then
+    PYTHON=".venv/bin/python"               # POSIX venv
+else
+    PYTHON="python"
+fi
+
+"$PYTHON" scripts/run_checks.py
+STATUS=$?
+
+if [ $STATUS -ne 0 ]; then
+    echo ""
+    echo "Commit blocked: verification failed. Fix the failures or run"
+    echo "  python scripts/run_checks.py"
+    echo "to reproduce. (Bypass only in emergencies with --no-verify.)"
+    exit $STATUS
+fi

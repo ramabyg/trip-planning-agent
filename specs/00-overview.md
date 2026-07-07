@@ -57,6 +57,7 @@ Example questions the agent should be able to answer:
 | `02-charging-agent.md` | Charging planner sub-agent spec (Task Mode) |
 | `03-park-logistics.md` | Park logistics sub-agent spec (Agent as a Tool) |
 | `04-orchestrator.md` | Conversational orchestrator agent spec (Root Agent) |
+| `05-testing.md` | Test strategy, layers, and the pre-commit verification gate |
 
 ## SDD conventions for this project
 

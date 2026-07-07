@@ -26,10 +26,19 @@ Specifies the behavior of the **Charging Planner Sub-agent**. This sub-agent run
 
 - **Name**: `charging_planner`
 - **Mode**: `task`
+- **Output Schema**: `schemas.ChargingPlan` (enforced by ADK, not by prompt convention)
 - **Tools**:
-  - `tools.calculate_tesla_segments`
-  - `tools.get_maps_mcp_toolset()` (specifically using `compute_routes` and `search_places`)
-- **System Instruction**: Guide the LLM to recursively check reachability, search for Superchargers, split the route, and call the auto-injected `finish_task` tool with the structured Pydantic schema once routing is complete.
+  - `tools.plan_charging_route` (the *only* tool — see implementation note below)
+- **System Instruction**: Call `plan_charging_route` once, then return its result
+  unchanged via the auto-injected `finish_task` tool. Choose the consumption rate
+  (280 vs. 320 Wh/mile) based on terrain; never do range math in the LLM.
+
+> **Implementation note (2026-07)**: The recursive algorithm below is implemented
+> as deterministic Python in `tools.plan_charging_route` (routing and charger
+> search via `maps_client.py`, Routes API v2 + Places Text Search), not as LLM
+> reasoning steps. Identical inputs therefore always produce the identical plan;
+> the LLM only selects inputs and narrates the structured result. Covered by
+> `tests/unit/test_charging_route_planner.py`.
 
 ## Inputs (Task Arguments)
 
