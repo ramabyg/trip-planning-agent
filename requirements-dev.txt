@@ -1,3 +1,6 @@
 -r requirements.txt
 pytest
 pytest-asyncio
+# Agent-level evals (`pytest -m eval`): pulls in pandas/tabulate etc. for
+# ADK's AgentEvaluator and LLM-as-judge metrics.
+google-adk[eval]

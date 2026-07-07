@@ -1,0 +1,37 @@
+{
+  "eval_set_id": "delegation_charging",
+  "name": "Charging planner delegation",
+  "description": "Tesla drive questions must be delegated to the charging_planner task sub-agent (which runs the deterministic tools.plan_charging_route). Trajectories through sub-agents are path-dependent, so only the final response is graded, against a reference derived from the deterministic planner's expected output.",
+  "eval_cases": [
+    {
+      "eval_id": "driggs_to_west_yellowstone_no_stop_needed",
+      "conversation": [
+        {
+          "invocation_id": "inv-1",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "It's July 20, 2026 and Family 1's Tesla is at 70% battery. We're driving from our Airbnb in Driggs, ID to the WestGate KOA in West Yellowstone, MT today. Do we need a Supercharger stop on the way?"
+              }
+            ]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "No Supercharger stop is needed. The drive from Driggs, ID to the WestGate KOA in West Yellowstone, MT is short — roughly 70–90 miles, about 1.5–2 hours. Starting at 70%, the Model Y arrives with roughly 35–50% battery, comfortably above the 10% safety buffer, so the destination is directly reachable in a single segment. The WestGate KOA is a campground with RV hookups, so the car can also charge overnight there."
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "trip_agent",
+        "user_id": "eval_user",
+        "state": {}
+      }
+    }
+  ],
+  "creation_timestamp": 0.0
+}

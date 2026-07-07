@@ -3,7 +3,10 @@
 Usage:
     python scripts/run_checks.py                # import check + offline unit tests
     python scripts/run_checks.py --integration  # additionally run live API tests
-    python scripts/run_checks.py --all          # everything
+    python scripts/run_checks.py --all          # everything except agent evals
+
+Agent-level evals (`pytest -m eval`) are never run here: they are
+model-in-the-loop, cost money, and are run on demand (specs/05-testing.md).
 
 Wired as the git pre-commit hook via .githooks/pre-commit.
 Exits non-zero on the first failing stage.
@@ -53,7 +56,7 @@ def main() -> int:
         print("\nFAILED: import sanity check")
         return 1
 
-    if not run_pytest("not integration", "offline unit tests"):
+    if not run_pytest("not integration and not eval", "offline unit tests"):
         print("\nFAILED: unit tests")
         return 1
 

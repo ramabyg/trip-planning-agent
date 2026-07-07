@@ -4,6 +4,8 @@ pythonpath = ["."]
 asyncio_mode = "auto"
 markers = [
     "integration: hits live external APIs; requires MAPS_API_KEY / NPS_API_KEY in .env",
+    "eval: model-in-the-loop agent evaluation; live Gemini + Maps calls, costs money; requires GEMINI_API_KEY in .env",
 ]
-# Unit tests only by default; run `pytest -m integration` for the live suite.
-addopts = "-m 'not integration'"
+# Unit tests only by default; `pytest -m integration` for the live suite,
+# `pytest -m eval` for the agent-level evals.
+addopts = "-m 'not integration and not eval'"

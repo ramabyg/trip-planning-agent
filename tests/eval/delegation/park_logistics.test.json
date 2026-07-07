@@ -1,0 +1,37 @@
+{
+  "eval_set_id": "delegation_park_logistics",
+  "name": "Park logistics delegation and mock-data disclosure",
+  "description": "A canonical question from specs/00-overview.md. With no NPS_API_KEY configured, get_nps_alerts returns the mock Glacier alerts (Many Glacier timed entry, Highline Trail grizzly closure) tagged source: mock — the agent MUST disclose that the alert data is simulated. Graded on final response only.",
+  "eval_cases": [
+    {
+      "eval_id": "many_glacier_status_with_mock_disclosure",
+      "conversation": [
+        {
+          "invocation_id": "inv-1",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "We're at the West Glacier KOA on July 24, 2026. Is the road to Many Glacier open, and do we need anything to drive in? If it's a problem, suggest a backup hike."
+              }
+            ]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "Important: the park alert data below is SIMULATED (mock data — there is no live NPS connection right now), so do not rely on it for safety decisions. Per the simulated alerts, the Many Glacier road itself is not closed, but a timed-entry reservation is required to enter the Many Glacier valley between 6 AM and 3 PM, so either book a timed-entry permit or arrive outside that window. Also per the simulated alerts, the Highline Trail is temporarily closed from Logan Pass to Granite Park Chalet due to grizzly bear activity. As a backup near the west side, consider a hike such as Trail of the Cedars or Avalanche Lake, and check current conditions and weather before heading out."
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "trip_agent",
+        "user_id": "eval_user",
+        "state": {}
+      }
+    }
+  ],
+  "creation_timestamp": 0.0
+}

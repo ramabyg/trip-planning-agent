@@ -50,8 +50,9 @@ pip install -r requirements-dev.txt
 
 pytest                              # offline unit tests (default)
 pytest -m integration               # live API tests (needs MAPS_API_KEY / NPS_API_KEY in .env)
+pytest -m eval                      # agent-level evals (model-in-the-loop; needs GEMINI_API_KEY)
 python scripts/run_checks.py        # commit gate: import sanity + unit tests
-python scripts/run_checks.py --all  # everything
+python scripts/run_checks.py --all  # everything except agent evals
 ```
 
 Enable the pre-commit hook once per clone so failing checks block commits:
@@ -66,6 +67,11 @@ git config core.hooksPath .githooks
 (deterministic routing/SOC math, structured `ChargingPlan` output), scoped MCP
 toolsets, mock-data disclosure, and an offline + live test suite with a
 pre-commit verification gate.
+
+✅ Phase 1b: agent-level evaluation (`pytest -m eval`) — ADK `AgentEvaluator`
+eval sets covering context grounding, charging-planner delegation, and the
+simulated-data disclosure rule, graded by exact tool trajectories plus an
+LLM-as-judge response metric. See `specs/05-testing.md`.
 
 ## Phase 1 scope (current)
 

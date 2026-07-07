@@ -27,15 +27,16 @@ pass before any commit.
 |---|---|---|---|
 | Unit (offline) | `tests/unit/` | nothing | trip-context helpers, Tesla range math, deterministic charging planner (fake road network), NPS alert tagging/fallbacks, `ChargingPlan` schema contract, agent wiring, MCP toolset config, plan save/upload (mocked GCS) |
 | Integration (live) | `tests/integration/` | `MAPS_API_KEY` / `NPS_API_KEY` in `.env` | Maps MCP transport + auth + expected tool surface, Routes/Places REST plausibility, live NPS alerts tagged `source: live` |
-| Agent-level eval | (planned, Phase 1b) | model access | end-to-end answer quality/consistency on the canonical questions from `specs/00-overview.md`, via `adk eval` |
+| Agent-level eval (Phase 1b) | `tests/eval/` | `GEMINI_API_KEY` + `MAPS_API_KEY` in `.env`, `google-adk[eval]` extras | end-to-end behavior on the canonical questions from `specs/00-overview.md`: context grounding, sub-agent delegation, mock-data disclosure |
 
 Run them:
 
 ```bash
-pytest                          # unit only (default; integration deselected)
+pytest                          # unit only (default; integration + eval deselected)
 pytest -m integration           # live suite only
+pytest -m eval                  # agent-level evals (model-in-the-loop, costs money)
 python scripts/run_checks.py        # commit gate: imports + unit
-python scripts/run_checks.py --all  # everything
+python scripts/run_checks.py --all  # everything except agent evals
 ```
 
 ## The fake road network
@@ -45,6 +46,30 @@ mile markers along a straight line, with routes computed by the same haversine
 the production geometry helpers use. This makes expected SOC values exact
 (e.g., 190 miles from 90% at 280 Wh/mile arrives at exactly 19%), so planner
 tests assert real numbers, not ranges.
+
+## Agent-level evaluation (Phase 1b)
+
+`tests/eval/test_agent_eval.py` drives the real orchestrator (live Gemini +
+Google Maps) over eval sets in ADK's `EvalSet` schema, via a pytest wrapper
+around ADK's `AgentEvaluator` — the same engine behind `adk eval`. The raw
+`adk eval` CLI is not used because it requires an `__init__.py`-based agent
+package layout; this repo keeps `agent.py` flat at the root, exposed to the
+evaluator through the `eval_entry.py` shim.
+
+Two eval sets, each with its own `test_config.json` criteria:
+
+| Eval set | Cases | Criteria | Rationale |
+|---|---|---|---|
+| `tests/eval/grounding/` | lodging + group split questions for Jul 20 / Jul 23 | `tool_trajectory_avg_score: 1.0`, `final_response_match_v2: 0.7` | fixed facts: the exact `get_trip_context(date=...)` call and the answer are both deterministic |
+| `tests/eval/delegation/` | Tesla charging question (Driggs → West Yellowstone), Many Glacier road status | `final_response_match_v2: 0.7` | routes through sub-agents are path-dependent, so no trajectory pinning; the LLM judge grades the final answer against a reference. The park case also verifies the simulated-data disclosure rule (no `NPS_API_KEY` → mock alerts). |
+
+`final_response_match_v2` is an LLM-as-judge metric (default judge:
+`gemini-2.5-flash`) — chosen over ROUGE-based `response_match_score` because
+answers legitimately vary in phrasing and include live route numbers.
+
+Cost policy: each case is one full agent run plus judge calls (`num_runs=1`).
+Evals run **on demand only** (`pytest -m eval`) — never in the commit gate,
+never in `run_checks.py --all`.
 
 ## Commit gate
 
