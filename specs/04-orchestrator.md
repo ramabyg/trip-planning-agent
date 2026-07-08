@@ -16,22 +16,28 @@ Specifies the behavior of the conversational **Orchestrator Agent** (the Root Ag
 
 ## Agent Configuration (ADK)
 
-- **Name**: `orchestrator`
-- **Model**: `gemini-2.5-pro`
+- **Name**: `root_agent`
+- **Model**: `gemini-3.5-flash`
 - **Sub-agents**:
-  - `charging_planner` (registered as a task sub-agent)
+  - `charging_planner` (registered as a task sub-agent; model `gemini-3.1-pro-preview`)
 - **Tools**:
-  - `AgentTool(park_logistics)` (wrapped sub-agent)
+  - `AgentTool(park_logistics)` (wrapped sub-agent; model `gemini-3.5-flash`)
   - `tools.get_trip_context`
   - `tools.save_and_upload_trip_plan`
-  - Maps MCP `search_places` (for general/food lookups)
+  - Maps MCP toolset scoped to `compute_routes`, `search_places`, `lookup_weather`
+    (routing for the gas cars, food/POI lookups, weather)
 
 ## Inputs
 
 - `user_message`: The text message sent by the user.
 - `current_location`: (Optional) User's current location. Defaults to the scheduled starting base for the active day if not specified.
-- `current_soc`: (Optional) User's current battery SOC (percentage). Defaults to 100% or uses manual input.
-- `current_date`: (Optional) The date within the road trip range (2026-07-18 to 2026-07-25). Defaults to 2026-07-18.
+- `current_soc`: User's current battery SOC (percentage, 10–100). **Never assumed**:
+  if the user hasn't stated it in this or an earlier message, the Orchestrator must
+  ask for it before delegating to the charging planner (see `tools.plan_charging_route`,
+  which also rejects out-of-range values).
+- `current_date`: (Optional) The date within the road trip range (2026-07-18 to
+  2026-07-25). The Orchestrator grounds whichever date the question concerns via
+  `get_trip_context(date=...)`; there is no hardcoded default date.
 
 ## Intent Routing & Execution Flow
 

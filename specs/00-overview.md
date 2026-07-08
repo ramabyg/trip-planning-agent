@@ -44,7 +44,7 @@ Example questions the agent should be able to answer:
 
 - Traffic / drive time
 - Weather (current + short-term forecast)
-- Tesla Supercharger / charger availability and reliability
+- DC fast-charger availability and reliability (Tesla Superchargers + CCS networks)
 - NPS road closures, timed-entry requirements, trailhead conditions
 - Restaurant/food options en route (hours, location relative to route)
 

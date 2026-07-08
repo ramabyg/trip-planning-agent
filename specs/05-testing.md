@@ -25,7 +25,7 @@ pass before any commit.
 
 | Layer | Location | Needs | Verifies |
 |---|---|---|---|
-| Unit (offline) | `tests/unit/` | nothing | trip-context helpers, Tesla range math, deterministic charging planner (fake road network), NPS alert tagging/fallbacks, `ChargingPlan` schema contract, agent wiring, MCP toolset config, plan save/upload (mocked GCS) |
+| Unit (offline) | `tests/unit/` | nothing | trip-context helpers, Tesla range math, elevation-adaptive energy model + charging curve, deterministic charging planner (fake road network: terrain, availability, amenities, charge-target caps), NPS alert tagging/fallbacks, `ChargingPlan` schema contract, agent wiring (incl. flow-log callbacks and the ADK streaming patch), MCP toolset config, plan save/upload (mocked GCS) |
 | Integration (live) | `tests/integration/` | `MAPS_API_KEY` / `NPS_API_KEY` in `.env` | Maps MCP transport + auth + expected tool surface, Routes/Places REST plausibility, live NPS alerts tagged `source: live` |
 | Agent-level eval (Phase 1b) | `tests/eval/` | `GEMINI_API_KEY` + `MAPS_API_KEY` in `.env`, `google-adk[eval]` extras | end-to-end behavior on the canonical questions from `specs/00-overview.md`: context grounding, sub-agent delegation, mock-data disclosure |
 
@@ -41,11 +41,15 @@ python scripts/run_checks.py --all  # everything except agent evals
 
 ## The fake road network
 
-`tests/conftest.py` provides `FakeMaps`: locations and Superchargers placed at
-mile markers along a straight line, with routes computed by the same haversine
-the production geometry helpers use. This makes expected SOC values exact
-(e.g., 190 miles from 90% at 280 Wh/mile arrives at exactly 19%), so planner
-tests assert real numbers, not ranges.
+`tests/conftest.py` provides `FakeMaps`: locations and DC fast chargers placed
+at mile markers along a straight line, with routes computed by the same
+haversine the production geometry helpers use. Chargers carry the v2 planner's
+attributes (max kW, live `available_count`, nearby amenities) and terrain is
+flat by default with `set_hill(start, end, peak_m)` to build elevation
+profiles. Flat terrain reproduces the 280 Wh/mile base rate exactly (e.g.,
+190 miles from 90% arrives at exactly 19%), so planner tests assert real
+numbers, not ranges; hills, availability, amenity ranking, and charge-target
+edge cases each get their own deterministic scenarios.
 
 ## Agent-level evaluation (Phase 1b)
 
@@ -63,9 +67,11 @@ Two eval sets, each with its own `test_config.json` criteria:
 | `tests/eval/grounding/` | lodging + group split questions for Jul 20 / Jul 23 | `tool_trajectory_avg_score: 1.0`, `final_response_match_v2: 0.7` | fixed facts: the exact `get_trip_context(date=...)` call and the answer are both deterministic |
 | `tests/eval/delegation/` | Tesla charging question (Driggs → West Yellowstone), Many Glacier road status | `final_response_match_v2: 0.7` | routes through sub-agents are path-dependent, so no trajectory pinning; the LLM judge grades the final answer against a reference. The park case also verifies the simulated-data disclosure rule (no `NPS_API_KEY` → mock alerts). |
 
-`final_response_match_v2` is an LLM-as-judge metric (default judge:
-`gemini-2.5-flash`) — chosen over ROUGE-based `response_match_score` because
-answers legitimately vary in phrasing and include live route numbers.
+`final_response_match_v2` is an LLM-as-judge metric. The judge model is ADK's
+built-in default (`gemini-2.5-flash` as of google-adk 2.4 — unrelated to the
+agent models in `agent.py`, which are `gemini-3.5-flash` / `gemini-3.1-pro-preview`).
+Chosen over ROUGE-based `response_match_score` because answers legitimately
+vary in phrasing and include live route numbers.
 
 Cost policy: each case is one full agent run plus judge calls (`num_runs=1`).
 Evals run **on demand only** (`pytest -m eval`) — never in the commit gate,
@@ -93,6 +99,12 @@ block commits); run them before deploys and after changing anything in
   Allowed`); it requires the streamable-HTTP transport. Caught by
   `tests/integration/test_maps_mcp_live.py`, fixed in
   `tools.get_maps_mcp_toolset` (2026-07).
+- google-adk 2.3/2.4 dispatches task delegations from partial (unpersisted)
+  streaming events, orphaning the synthesized function response and poisoning
+  the session ("No function call event found for function responses ids").
+  Worked around in `adk_patches.py`; guarded by
+  `tests/unit/test_agent_wiring.py::test_adk_task_streaming_patch_applied`
+  (2026-07).
 
 ## Non-goals
 

@@ -359,7 +359,7 @@ async function sendMessage() {
                     
                     let stage = "Running task...";
                     if (part.functionCall.name === 'get_trip_context') stage = "Checking bookings database...";
-                    else if (part.functionCall.name === 'charging_planner') stage = "Calculating EV battery range & Superchargers...";
+                    else if (part.functionCall.name === 'charging_planner') stage = "Calculating EV battery range & fast-charging stops...";
                     else if (part.functionCall.name === 'park_logistics') stage = "Querying NPS road alerts & weather...";
                     else if (part.functionCall.name === 'save_and_upload_trip_plan') stage = "Uploading plan itinerary to GCS...";
                     updateSpinnerStatus(stage);
