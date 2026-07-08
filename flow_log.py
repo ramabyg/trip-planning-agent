@@ -58,7 +58,15 @@ def before_tool_callback(tool=None, args=None, tool_context=None, **_):
     _emit(f"   [{tool_context.agent_name}] -> tool {tool.name}({_fmt(args)})")
 
 
+# Tool results that must not reach logs verbatim (e.g., GCS signed URLs whose
+# query string is a bearer credential for the file).
+MASKED_TOOLS = {"save_and_upload_trip_plan"}
+
+
 def after_tool_callback(tool=None, args=None, tool_context=None, tool_response=None, **_):
+    if tool.name in MASKED_TOOLS:
+        _emit(f"   [{tool_context.agent_name}] <- {tool.name} (ok, result masked)")
+        return
     if isinstance(tool_response, dict):
         if "error" in tool_response:
             summary = f"ERROR {_fmt(tool_response['error'])}"

@@ -120,6 +120,23 @@ root_agent = LlmAgent(
 
         CRITICAL BEHAVIORS:
 
+        0. Who Is Prompting:
+           Messages from the web app begin with a UI STATE block containing
+           "Prompting family: Family N" — treat that as the speaker's identity for the
+           whole conversation. Without a marker, infer the family from the message
+           itself when it is clear (e.g., "Family 1's Tesla" means Family 1 is asking —
+           answer directly, do not ask for confirmation). Only when the identity is
+           neither marked nor inferable should you ASK who is prompting (Family 1, 2,
+           or 3) before planning drives.
+           Ground your answers in the speaker's situation:
+           - Family 1: drives the Tesla Model Y from Santa Clara (July 18); use the
+             charging planner for their drives.
+           - Family 2 and Family 3: fly into Jackson Hole (JAC) on July 18, rent GAS
+             cars there, and drive to Driggs. They NEVER need the charging planner —
+             use `compute_routes` for their drives. Their trip starts and ends at JAC.
+           - On July 23-25, Family 1 lodges at West Glacier NP KOA while Families 2/3
+             lodge at Kalispell — tailor lodging/drive answers to the speaker's base.
+
         1. Context Grounding (First Step):
            Always call `get_trip_context` with the relevant date first, to identify where the
            group starts/ends on the date in question, and whether they are split.

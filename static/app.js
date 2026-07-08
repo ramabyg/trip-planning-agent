@@ -3,6 +3,8 @@ const appName = 'agent';
 
 let currentDayIndex = 1;
 let tripData = null;
+// Identity comes from the login cookie via /api/me (specs/06-deployment.md).
+let currentFamily = { family: 'family-1', label: 'Family 1' };
 
 // Day Metadata mapping dates/routes for visual fidelity
 const dayRoutes = {
@@ -36,10 +38,33 @@ const hudAdvisories = document.getElementById('hud-advisories');
 
 // Initialize App
 document.addEventListener('DOMContentLoaded', async () => {
+    await fetchIdentity();
     await fetchTripContext();
     setupEventListeners();
     selectDay(1);
 });
+
+// Who is logged in? Redirect to the login page when the cookie is missing/expired.
+async function fetchIdentity() {
+    try {
+        const res = await fetch('/api/me');
+        if (res.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
+        currentFamily = await res.json();
+    } catch (e) {
+        console.error('Failed to load identity:', e);
+    }
+    // Personalize the static welcome message and hide the Tesla SOC pill
+    // for the gas-car families.
+    const welcome = document.querySelector('.message.agent .message-content p');
+    if (welcome) welcome.textContent = `Welcome, ${currentFamily.label}! 🏔️ I am your Yellowstone Road Trip Assistant.`;
+    if (currentFamily.family !== 'family-1') {
+        const socPill = document.querySelector('.soc-pill');
+        if (socPill) socPill.style.display = 'none';
+    }
+}
 
 // Event Listeners
 function setupEventListeners() {
@@ -219,9 +244,11 @@ async function sendMessage() {
     // Add user message to chat
     appendMessage('user', text);
     
-    // Create pre-grounded prompt to ensure agent knows the current state in UI
+    // Create pre-grounded prompt to ensure agent knows the current state in UI.
+    // The SOC only applies to Family 1's Tesla; gas-car families never send one.
+    const socState = currentFamily.family === 'family-1' ? `, Current SOC: ${soc}%` : '';
     const groundedPrompt = `
-        [UI STATE: Trip Day ${currentDayIndex}, Date: ${route.date}, Current Origin: ${route.origin}, Tonight Destination: ${route.destination}, Current SOC: ${soc}%]
+        [UI STATE: Prompting family: ${currentFamily.label}, Trip Day ${currentDayIndex}, Date: ${route.date}, Current Origin: ${route.origin}, Tonight Destination: ${route.destination}${socState}]
         User Query: ${text}
     `;
     
@@ -246,13 +273,17 @@ async function sendMessage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 app_name: appName,
-                user_id: 'family-1-user',
+                user_id: currentFamily.family,
                 session_id: sessionId,
                 new_message: { parts: [{ text: groundedPrompt }] },
                 streaming: true
             })
         });
-        
+        if (response.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
+
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';

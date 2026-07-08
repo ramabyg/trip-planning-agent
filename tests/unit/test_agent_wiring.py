@@ -64,6 +64,16 @@ class TestRootAgent:
         assert set(toolsets[0].tool_filter) == {"compute_routes", "search_places", "lookup_weather"}
 
 
+def test_root_grounds_on_prompting_family():
+    # Deployed UI tags every session with "Prompting family: Family N"; the
+    # root agent must use it (and ask when it's absent) and must never send
+    # the gas-car families to the charging planner.
+    instruction = agent.root_agent.instruction
+    assert "Prompting family" in instruction
+    assert "ASK who is prompting" in instruction
+    assert "NEVER need the charging planner" in instruction
+
+
 def test_flow_log_callbacks_attached_to_every_agent():
     # The real-time terminal flow log must observe every agent's hops.
     import flow_log
