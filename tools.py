@@ -1,5 +1,6 @@
 import os
 import re
+import math
 import yaml
 import json
 import datetime
@@ -19,14 +20,36 @@ SPEC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "specs", "0
 TRIP_START = datetime.date(2026, 7, 18)
 TRIP_END = datetime.date(2026, 7, 25)
 
-# Vehicle constants (specs/02-charging-agent.md)
+# Vehicle & planning constants (specs/02-charging-agent.md)
 BATTERY_CAPACITY_KWH = 75.0
 DEFAULT_CONSUMPTION_WH_PER_MILE = 280.0
-MOUNTAIN_CONSUMPTION_WH_PER_MILE = 320.0
+FALLBACK_CONSUMPTION_WH_PER_MILE = 300.0  # flat rate when elevation data is unavailable
 DEFAULT_SAFETY_BUFFER_SOC = 10
-CHARGE_TARGET_SOC = 80
-MAX_CHARGING_STOPS = 6
+DEFAULT_CHARGE_TARGET_SOC = 80
+MAX_CHARGE_TARGET_SOC = 95
+CHARGE_MARGIN_SOC = 5  # headroom added on top of the buffer when sizing a charge
+MAX_CHARGING_STOPS = 20  # runaway guard, not a planning constraint
 CHARGER_SEARCH_RADIUS_M = 40000.0
+MIN_CHARGER_POWER_KW = 100.0  # primary tier: avoid long dwell at slow chargers
+FALLBACK_MIN_CHARGER_POWER_KW = 50.0  # last resort on sparse corridors
+MAX_VEHICLE_CHARGE_KW = 250.0
+
+# Elevation-adaptive energy model (per ~5-mile chunk of the route polyline).
+# Regen is credited at only 40% recovery — deliberately conservative so range
+# estimates err on the safe side.
+ENERGY_CHUNK_MILES = 5.0
+WH_PER_METER_CLIMB = 7.0
+REGEN_RECOVERY = 0.40
+WH_PER_METER_DESCENT_CREDIT = WH_PER_METER_CLIMB * REGEN_RECOVERY  # 2.8
+MIN_CHUNK_WH_PER_MILE = 180.0
+MAX_CHUNK_WH_PER_MILE = 550.0
+
+# Piecewise Model Y LR charging curve: (from_soc, to_soc, avg_kw at a 250 kW station).
+CHARGE_CURVE_BANDS = ((10, 55, 170.0), (55, 80, 95.0), (80, 95, 45.0))
+
+# Fractions of the reachable-energy budget at which to search for chargers.
+CHARGER_SEARCH_FRACTIONS = (0.95, 0.8, 0.65, 0.5, 0.35, 0.2)
+CHARGER_CANDIDATES_TO_TRY = 5
 
 
 def get_maps_mcp_toolset(tool_filter: list | None = None):
@@ -183,114 +206,358 @@ def calculate_tesla_segments(
     return result
 
 
-def _select_charging_stop(start: str, polyline_points: list, current_soc: int,
-                          consumption_rate_wh_per_mile: float) -> dict | None:
-    """Finds the best on-route Supercharger reachable from `start` with the buffer intact.
+# --- Elevation-adaptive energy model (pure, no network) ---
 
-    Candidates are searched near the max-range point on the route polyline and
-    ranked by distance from the route (a cheap detour proxy). Returns the leg
-    info for the chosen charger, or None when nothing feasible is found.
+def build_energy_profile(points: list, elevations: list | None,
+                         flat_rate_wh_per_mile: float | None = None) -> list:
+    """Splits a route polyline into ~5-mile chunks with terrain-adjusted rates.
+
+    `points` and `elevations` must be index-aligned. Each chunk carries
+    {"points", "miles", "wh_per_mile", "kwh"}. Without elevations, every chunk
+    uses flat_rate_wh_per_mile (280 base when that is None too).
     """
-    calc = calculate_tesla_segments(0, current_soc, consumption_rate_wh_per_mile)
-    max_range = calc["max_range_before_charge"]
-    start_point = polyline_points[0]
+    if len(points) < 2:
+        return []
+    flat = flat_rate_wh_per_mile if elevations is None else None
+    if elevations is None and flat is None:
+        flat = DEFAULT_CONSUMPTION_WH_PER_MILE
 
-    candidates = []
-    # Search slightly before the hard range limit; fall back to earlier on the route.
-    for fraction in (0.9, 0.6):
-        sample = maps_client.point_at_distance(polyline_points, max_range * fraction)
-        candidates = maps_client.find_superchargers_near(sample[0], sample[1], CHARGER_SEARCH_RADIUS_M)
-        if candidates:
-            break
-    if not candidates:
+    chunks = []
+    chunk_points = [points[0]]
+    chunk_miles = ascent_m = descent_m = 0.0
+    for i in range(1, len(points)):
+        chunk_points.append(points[i])
+        chunk_miles += maps_client.haversine_miles(points[i - 1], points[i])
+        if elevations is not None:
+            delta = elevations[i] - elevations[i - 1]
+            if delta > 0:
+                ascent_m += delta
+            else:
+                descent_m -= delta
+        if chunk_miles >= ENERGY_CHUNK_MILES or i == len(points) - 1:
+            if chunk_miles > 0:
+                if flat is not None:
+                    rate = flat
+                else:
+                    rate = DEFAULT_CONSUMPTION_WH_PER_MILE + (
+                        ascent_m * WH_PER_METER_CLIMB
+                        - descent_m * WH_PER_METER_DESCENT_CREDIT) / chunk_miles
+                    rate = min(MAX_CHUNK_WH_PER_MILE, max(MIN_CHUNK_WH_PER_MILE, rate))
+                chunks.append({
+                    "points": chunk_points,
+                    "miles": chunk_miles,
+                    "wh_per_mile": rate,
+                    "kwh": chunk_miles * rate / 1000.0,
+                })
+            chunk_points = [points[i]]
+            chunk_miles = ascent_m = descent_m = 0.0
+    return chunks
+
+
+def profile_energy_kwh(profile: list) -> float:
+    return sum(c["kwh"] for c in profile)
+
+
+def point_at_energy_budget(profile: list, budget_kwh: float) -> tuple:
+    """Farthest polyline point reachable within the energy budget (conservative:
+    stops at the last point fully inside the budget)."""
+    if not profile:
+        raise ValueError("empty energy profile")
+    last = profile[0]["points"][0]
+    remaining = budget_kwh
+    for chunk in profile:
+        if chunk["kwh"] <= remaining:
+            remaining -= chunk["kwh"]
+            last = chunk["points"][-1]
+            continue
+        kwh_per_mile = chunk["wh_per_mile"] / 1000.0
+        pts = chunk["points"]
+        for prev, cur in zip(pts, pts[1:]):
+            step = maps_client.haversine_miles(prev, cur) * kwh_per_mile
+            if step > remaining:
+                return last
+            remaining -= step
+            last = cur
+        return last
+    return last
+
+
+def estimate_charge_time_minutes(from_soc: float, to_soc: float,
+                                 station_kw: float | None = None) -> float:
+    """DC charge time from a piecewise Model Y LR curve, capped by station power.
+
+    The 10-55% band scales with station power; upper bands are already below
+    most stations' limits and are only clamped, never scaled up.
+    """
+    if to_soc <= from_soc:
+        return 0.0
+    power = min(station_kw or MAX_VEHICLE_CHARGE_KW, MAX_VEHICLE_CHARGE_KW)
+    from_soc = max(from_soc, float(CHARGE_CURVE_BANDS[0][0]))
+    minutes = 0.0
+    for band_lo, band_hi, avg_kw in CHARGE_CURVE_BANDS:
+        lo, hi = max(band_lo, from_soc), min(band_hi, to_soc)
+        if hi <= lo:
+            continue
+        if band_lo == CHARGE_CURVE_BANDS[0][0]:
+            rate = min(avg_kw * power / MAX_VEHICLE_CHARGE_KW, power)
+        else:
+            rate = min(avg_kw, power)
+        energy_kwh = (hi - lo) / 100.0 * BATTERY_CAPACITY_KWH
+        minutes += energy_kwh / rate * 60.0
+    return minutes
+
+
+def _leg_energy(route: dict, flat_override: float | None) -> tuple:
+    """Energy analysis for one routed leg.
+
+    Returns (profile, avg_wh_per_mile, soc_needed, fallback_note). Uses the
+    Elevation API unless flat_override is given; falls back to a flat
+    conservative rate (with a note) when elevation data is unavailable. Chunk
+    mileage is rescaled to the Routes API distance so haversine shortfall on
+    the downsampled polyline never under-counts energy.
+    """
+    points = route["polyline_points"]
+    fallback_note = None
+    if flat_override is not None:
+        profile = build_energy_profile(points, None, flat_override)
+    else:
+        sampled = maps_client.downsample(points, maps_client.MAX_ELEVATION_SAMPLES)
+        try:
+            elevations = maps_client.get_elevations(sampled)
+            profile = build_energy_profile(sampled, elevations)
+        except Exception as e:
+            fallback_note = (f"Elevation data unavailable ({e}); used a flat "
+                             f"{FALLBACK_CONSUMPTION_WH_PER_MILE:.0f} Wh/mile estimate.")
+            profile = build_energy_profile(points, None, FALLBACK_CONSUMPTION_WH_PER_MILE)
+
+    route_miles = route["distance_miles"]
+    profile_miles = sum(c["miles"] for c in profile)
+    if profile and profile_miles > 0 and route_miles > 0:
+        scale = route_miles / profile_miles
+        for c in profile:
+            c["miles"] *= scale
+            c["kwh"] *= scale
+
+    kwh = profile_energy_kwh(profile)
+    soc_needed = kwh / BATTERY_CAPACITY_KWH * 100.0
+    avg_rate = (kwh * 1000.0 / route_miles) if route_miles > 0 else 0.0
+    return profile, avg_rate, soc_needed, fallback_note
+
+
+# --- Charging stop selection ---
+
+def _select_charging_stop(profile: list, departure_soc: float,
+                          start: str, flat_override: float | None) -> dict | None:
+    """Best on-route fast charger reachable from `start` with the buffer intact.
+
+    Searches near sample points at fractions of the reachable-energy budget
+    (≥100 kW first, ≥50 kW as a last resort), drops stations whose live status
+    shows zero usable connectors, prefers live-confirmed and amenity-rich
+    stops, then confirms feasibility on the actual routed leg.
+    """
+    budget_kwh = (departure_soc - DEFAULT_SAFETY_BUFFER_SOC) / 100.0 * BATTERY_CAPACITY_KWH
+    if budget_kwh <= 0 or not profile:
         return None
+    start_point = profile[0]["points"][0]
+    route_points = [p for chunk in profile for p in chunk["points"]]
 
-    candidates.sort(key=lambda c: maps_client.distance_to_polyline_miles((c["lat"], c["lng"]), polyline_points))
+    def detour(c) -> float:
+        return maps_client.distance_to_polyline_miles((c["lat"], c["lng"]), route_points)
 
-    for candidate in candidates[:3]:
-        # Skip chargers at (or behind) the starting point — no forward progress.
-        if maps_client.haversine_miles(start_point, (candidate["lat"], candidate["lng"])) < 1.0:
-            continue
-        leg = maps_client.compute_route(start, f"{candidate['lat']},{candidate['lng']}")
-        if "error" in leg:
-            continue
-        leg_calc = calculate_tesla_segments(leg["distance_miles"], current_soc, consumption_rate_wh_per_mile)
-        if leg_calc["reachable"]:
-            return {
-                "charger": candidate,
-                "distance_miles": leg["distance_miles"],
-                "duration_minutes": leg["duration_minutes"],
-                "arrival_soc": leg_calc["projected_arrival_soc"],
-            }
+    # Fractions are tried farthest-first and a feasible charger at a farther
+    # fraction always wins: mixing all fractions into one pool would let a
+    # low-detour charger right after the start win and the plan crawl forward
+    # in tiny hops. The slow-charger tier only opens once every fraction has
+    # failed at >=100 kW.
+    rejected = set()
+    for min_kw in (MIN_CHARGER_POWER_KW, FALLBACK_MIN_CHARGER_POWER_KW):
+        for fraction in CHARGER_SEARCH_FRACTIONS:
+            sample = point_at_energy_budget(profile, budget_kwh * fraction)
+            candidates = []
+            seen = set()
+            for c in maps_client.find_fast_chargers_near(
+                    sample[0], sample[1], CHARGER_SEARCH_RADIUS_M, min_kw):
+                key = (round(c["lat"], 4), round(c["lng"], 4))
+                if key in seen or key in rejected:
+                    continue
+                seen.add(key)
+                # Confirmed dead/fully-occupied stations are useless; unknown
+                # availability (no live feed) stays in, ranked lower below.
+                if c.get("available_count") is not None and c["available_count"] <= 0:
+                    continue
+                # No forward progress from (or behind) the starting point.
+                if maps_client.haversine_miles(start_point, (c["lat"], c["lng"])) < 1.0:
+                    continue
+                candidates.append(c)
+            if not candidates:
+                continue
+
+            candidates.sort(key=lambda c: (c.get("available_count") is None, detour(c),
+                                           -(c.get("max_kw") or 0.0)))
+            shortlist = candidates[:CHARGER_CANDIDATES_TO_TRY]
+            for c in shortlist:
+                try:
+                    c["amenities"] = maps_client.find_amenities_near(c["lat"], c["lng"])
+                except Exception:
+                    c["amenities"] = []
+            shortlist.sort(key=lambda c: (c.get("available_count") is None,
+                                          not c["amenities"], detour(c),
+                                          -(c.get("max_kw") or 0.0)))
+
+            for candidate in shortlist:
+                leg = maps_client.compute_route(start, f"{candidate['lat']},{candidate['lng']}")
+                if "error" in leg:
+                    rejected.add((round(candidate["lat"], 4), round(candidate["lng"], 4)))
+                    continue
+                _, avg_rate, soc_needed, _ = _leg_energy(leg, flat_override)
+                if departure_soc - soc_needed >= DEFAULT_SAFETY_BUFFER_SOC:
+                    return {
+                        "charger": candidate,
+                        "distance_miles": leg["distance_miles"],
+                        "duration_minutes": leg["duration_minutes"],
+                        "soc_needed": soc_needed,
+                        "avg_rate": avg_rate,
+                    }
+                rejected.add((round(candidate["lat"], 4), round(candidate["lng"], 4)))
     return None
 
 
-def plan_charging_route(origin: str, destination: str, current_soc: int,
-                        consumption_rate_wh_per_mile: float) -> dict:
+def plan_charging_route(origin: str, destination: str, current_soc: int) -> dict:
     """
-    Plans the full EV driving route from origin to destination, inserting Tesla
-    Supercharger stops wherever the destination is beyond safe range. The whole
-    algorithm is deterministic: routing, charger search, and SOC math all happen
-    in code, so identical inputs always give the identical plan.
+    Plans the full EV driving route from origin to destination, inserting DC
+    fast-charging stops (Tesla Superchargers or CCS networks such as EVgo,
+    Electrify America, ChargePoint) wherever the destination is beyond safe
+    range. The whole algorithm is deterministic: routing, elevation-adjusted
+    consumption, charger search, charge targets, and SOC math all happen in
+    code, so identical inputs always give the identical plan.
 
     Args:
         origin: Starting location (address or "lat,lng").
         destination: Final destination (address or "lat,lng").
         current_soc: Battery state of charge at departure (10-100).
-        consumption_rate_wh_per_mile: 280 for typical highway driving; use 320
-            for mountain passes or heavy climate-control load.
 
     Returns:
         A dict matching the ChargingPlan schema, or {"error": ...} when no safe
         plan exists.
     """
+    return _plan_charging_route(origin, destination, current_soc)
+
+
+def _plan_charging_route(origin: str, destination: str, current_soc: int,
+                         flat_override: float | None = None) -> dict:
+    """Implementation of plan_charging_route; flat_override bypasses the
+    elevation model with a fixed Wh/mile rate (tests and what-if analysis)."""
+    if not DEFAULT_SAFETY_BUFFER_SOC <= current_soc <= 100:
+        return {"error": f"current_soc must be between {DEFAULT_SAFETY_BUFFER_SOC} and 100 "
+                         f"(got {current_soc}). Ask the driver for the actual battery level."}
     segments = []
+    notes = []
     start = origin
     soc = float(current_soc)
+    total_charge_minutes = 0.0
+    # Set while parked at a charger whose charge target isn't known yet (it
+    # depends on the *next* leg): {"arrival_soc", "max_kw"}; the segment to
+    # patch is always segments[-1].
+    pending_charge = None
+
+    def finalize_pending_charge(next_leg_soc_needed: float) -> float:
+        """Sizes the charge at the stop we're parked at: 80% when that covers
+        the next leg (+buffer +margin), stretched up to 95% when needed. A
+        charge target never exceeds MAX_CHARGE_TARGET_SOC; if the car arrives
+        already at/above the target (e.g., left the origin near 100% and the
+        charger is close), the stop becomes a pass-through with no charging."""
+        nonlocal total_charge_minutes, pending_charge
+        arrival = pending_charge["arrival_soc"]
+        required = next_leg_soc_needed + DEFAULT_SAFETY_BUFFER_SOC + CHARGE_MARGIN_SOC
+        target = max(DEFAULT_CHARGE_TARGET_SOC,
+                     min(MAX_CHARGE_TARGET_SOC, math.ceil(required)))
+        segment = segments[-1]
+        if arrival >= target:
+            # Departure equals arrival: SOC state may sit above 95, but we
+            # never *charge* past the cap.
+            segment["action"] = f"No charging needed (continue at {int(round(arrival))}%)"
+            segment["charge_time_minutes"] = 0.0
+            pending_charge = None
+            return arrival
+        minutes = estimate_charge_time_minutes(arrival, target, pending_charge["max_kw"])
+        segment["action"] = f"Charge to {target}% (~{round(minutes)} min)"
+        segment["charge_time_minutes"] = round(minutes, 1)
+        total_charge_minutes += minutes
+        pending_charge = None
+        return float(target)
 
     for _ in range(MAX_CHARGING_STOPS + 1):
         route = maps_client.compute_route(start, destination)
         if "error" in route:
             return {"error": route["error"]}
 
-        calc = calculate_tesla_segments(route["distance_miles"], soc, consumption_rate_wh_per_mile)
-        if calc["reachable"]:
+        profile, avg_rate, soc_needed, fallback_note = _leg_energy(route, flat_override)
+        if fallback_note and fallback_note not in notes:
+            notes.append(fallback_note)
+
+        # Departure ceiling: at a charger we may charge up to 95% (or keep an
+        # even higher arrival SOC without charging); at the origin we have
+        # what we have.
+        if pending_charge:
+            max_departure = max(float(MAX_CHARGE_TARGET_SOC), pending_charge["arrival_soc"])
+        else:
+            max_departure = soc
+
+        if max_departure - soc_needed >= DEFAULT_SAFETY_BUFFER_SOC:
+            if pending_charge:
+                soc = finalize_pending_charge(soc_needed)
             segments.append({
                 "start": start,
                 "end": destination,
                 "distance_miles": round(route["distance_miles"], 1),
                 "duration_minutes": round(route["duration_minutes"], 1),
                 "departure_soc": int(round(soc)),
-                "arrival_soc": int(round(calc["projected_arrival_soc"])),
+                "arrival_soc": int(round(soc - soc_needed)),
                 "action": "Arrive at destination",
+                "avg_consumption_wh_per_mile": round(avg_rate, 1),
             })
             plan = {
                 "directly_reachable": len(segments) == 1,
                 "total_distance_miles": round(sum(s["distance_miles"] for s in segments), 1),
                 "total_duration_minutes": round(sum(s["duration_minutes"] for s in segments), 1),
+                "total_charge_time_minutes": (round(total_charge_minutes, 1)
+                                              if total_charge_minutes else None),
                 "segments": segments,
+                "notes": notes or None,
             }
             return ChargingPlan(**plan).model_dump()
 
-        stop = _select_charging_stop(start, route["polyline_points"], int(round(soc)),
-                                     consumption_rate_wh_per_mile)
+        stop = _select_charging_stop(profile, max_departure, start, flat_override)
         if stop is None:
-            return {"error": f"No reachable Tesla Supercharger found within "
-                             f"{calc['max_range_before_charge']} miles along the route from '{start}'. "
+            return {"error": f"No working DC fast charger "
+                             f"(≥{FALLBACK_MIN_CHARGER_POWER_KW:.0f} kW) is reachable along the "
+                             f"route from '{start}' even at a {int(max_departure)}% departure. "
                              f"Charge to a higher SOC before departing, or plan a different route."}
 
+        if pending_charge:
+            soc = finalize_pending_charge(stop["soc_needed"])
+
         charger = stop["charger"]
+        if charger.get("max_kw") and charger["max_kw"] < MIN_CHARGER_POWER_KW:
+            notes.append(f"{charger['name']} is a slower charger "
+                         f"({charger['max_kw']:.0f} kW) — no ≥{MIN_CHARGER_POWER_KW:.0f} kW "
+                         f"station was reachable on this stretch.")
+        arrival_soc = soc - stop["soc_needed"]
         segments.append({
             "start": start,
             "end": f"{charger['name']} ({charger['address']})",
             "distance_miles": round(stop["distance_miles"], 1),
             "duration_minutes": round(stop["duration_minutes"], 1),
             "departure_soc": int(round(soc)),
-            "arrival_soc": int(round(stop["arrival_soc"])),
-            "action": f"Charge to {CHARGE_TARGET_SOC}%",
+            "arrival_soc": int(round(arrival_soc)),
+            "action": "Charge",  # patched by finalize_pending_charge next iteration
+            "avg_consumption_wh_per_mile": round(stop["avg_rate"], 1),
+            "charger_power_kw": charger.get("max_kw"),
+            "charger_amenities": charger.get("amenities") or None,
         })
+        pending_charge = {"arrival_soc": arrival_soc, "max_kw": charger.get("max_kw")}
         start = f"{charger['lat']},{charger['lng']}"
-        soc = float(CHARGE_TARGET_SOC)
+        soc = arrival_soc
 
     return {"error": f"Charging plan exceeded {MAX_CHARGING_STOPS} stops without reaching "
                      f"'{destination}'. Check the origin/destination inputs."}
