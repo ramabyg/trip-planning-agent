@@ -1,4 +1,5 @@
 import dotenv
+import adk_patches  # noqa: F401  (workaround for ADK streaming/task-mode bug)
 import tools
 from google.adk.agents import LlmAgent
 from google.adk.tools import AgentTool
@@ -21,20 +22,20 @@ charging_planner = LlmAgent(
     output_schema=ChargingPlan,
     generate_content_config=LOW_TEMP_CONFIG,
     instruction="""
-        You are the EV Charging Planner Sub-agent for a 2023 Tesla Model Y Long Range.
+        You are the EV Charging Planner Sub-agent for a 2023 Tesla Model Y Long Range
+        (Tesla Superchargers plus CCS fast-charging networks like EVgo, Electrify
+        America, and ChargePoint via the CCS adapter).
         Given an origin, a destination, and a starting battery SOC (State of Charge),
         produce the charging plan by calling the `plan_charging_route` tool exactly once.
-        The tool runs the entire deterministic algorithm: routing, Supercharger search,
-        and SOC math. Do not attempt any range calculations yourself.
-
-        Choosing consumption_rate_wh_per_mile:
-        - 280 for typical highway driving.
-        - 320 when the route crosses mountain passes or high elevations
-          (e.g., routes into Grand Teton, Yellowstone, or Glacier NP).
+        The tool runs the entire deterministic algorithm: routing, elevation-adjusted
+        consumption, charger search (with real-time availability and nearby amenities),
+        adaptive charge targets (80% normally, up to 95% when a long leg demands it),
+        and SOC math. Do not attempt any range calculations yourself and never pick a
+        consumption rate — terrain is handled automatically.
 
         After the tool returns:
         - On success, call `finish_task` with the returned plan exactly as-is.
-          Do not alter distances, durations, or SOC values.
+          Do not alter distances, durations, SOC values, charge times, or notes.
         - If the tool returns an error, report the error message clearly instead of
           inventing a plan.
     """,
@@ -93,7 +94,8 @@ root_agent = LlmAgent(
            that night's lodging, and whether the families are together or split.
         2. `request_task_charging_planner`: delegates to the charging planner sub-agent for
            Family 1's Tesla Model Y. Provide origin, destination, and current battery SOC.
-           It returns a structured plan with drive segments and Supercharger stops.
+           It returns a structured plan with drive segments, fast-charging stops
+           (Tesla or CCS networks), charge times, and nearby amenities at each stop.
         3. `park_logistics`: sub-agent tool for weather, closures, or hikes in Yellowstone,
            Grand Teton, or Glacier. Pass the park name.
         4. `save_and_upload_trip_plan`: saves a daily plan to the cloud when the user asks to

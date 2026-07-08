@@ -64,6 +64,28 @@ class TestRootAgent:
         assert set(toolsets[0].tool_filter) == {"compute_routes", "search_places", "lookup_weather"}
 
 
+def test_adk_task_streaming_patch_applied():
+    # adk_patches works around a google-adk 2.3/2.4 bug where task delegation
+    # under SSE streaming dispatches from a partial (unpersisted) event and
+    # poisons the session ("No function call event found for function
+    # responses ids"). agent.py must keep importing it.
+    import adk_patches
+    from google.adk.workflow import _llm_agent_wrapper
+    assert (_llm_agent_wrapper._extract_task_delegation_fcs
+            is adk_patches._extract_task_delegation_fcs_skip_partials)
+
+    from google.adk.events import Event
+    from google.genai import types as genai
+    partial_fc_event = Event(
+        author="root_agent",
+        invocation_id="inv",
+        partial=True,
+        content=genai.Content(role="model", parts=[genai.Part(
+            function_call=genai.FunctionCall(id="x", name="charging_planner", args={}))]),
+    )
+    assert _llm_agent_wrapper._extract_task_delegation_fcs(partial_fc_event, {}) == []
+
+
 def test_low_temperature_on_every_agent():
     for llm_agent in (agent.root_agent, agent.charging_planner, agent.park_logistics):
         config = llm_agent.generate_content_config
