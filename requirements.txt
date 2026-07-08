@@ -1,4 +1,5 @@
 google-adk==2.4.0
+mcp>=1.28  # ADK's McpToolset silently disappears without it (guarded import)
 python-dotenv
 google-genai
 google-cloud-storage

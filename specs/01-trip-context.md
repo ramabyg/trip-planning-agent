@@ -42,41 +42,50 @@ trip:
       travel_mode: "Flying to Jackson Hole (JAC) on July 18th, renting a gas car, driving to Driggs, ID"
 
 accommodations:
-  - dates: ["2026-07-18", "2026-07-20"]
+  # Exact street addresses are intentionally NOT committed (public repo).
+  # They live in specs/trip-context-overrides.yaml (gitignored, deployed with
+  # the app), keyed by the stable `id` below — see specs/06-deployment.md.
+  - id: airbnb-driggs
+    dates: ["2026-07-18", "2026-07-20"]
     type: airbnb
     location: "Driggs, ID"
-    address: "823 Booshway Street, Driggs, ID 83422"
+    address: "Driggs, ID 83422"
     occupants: [Family 1 & family, Family 2 & family, Family 3 & family]
     note: "Shared by all 3 families (12 people total)"
 
-  - dates: ["2026-07-20", "2026-07-22"]
+  - id: koa-westgate
+    dates: ["2026-07-20", "2026-07-22"]
     type: campground
     name: "WestGate KOA"
-    address: "3305 Targhee Pass Highway, West Yellowstone, MT 59758"
+    address: "West Yellowstone, MT 59758"
     occupants: [Family 1 & family, Family 2 & family, Family 3 & family]
     note: "Shared by all 3 families (12 people total)"
 
-  - dates: ["2026-07-22", "2026-07-23"]
+  - id: airbnb-gardiner
+    dates: ["2026-07-22", "2026-07-23"]
     type: airbnb
     location: "Gardiner, MT"
     occupants: [Family 1 & family, Family 2 & family, Family 3 & family]
     note: "Shared by all 3 families (12 people total)"
 
-  - dates: ["2026-07-23", "2026-07-25"]
+  - id: koa-west-glacier
+    dates: ["2026-07-23", "2026-07-25"]
     type: campground
     name: "West Glacier NP KOA"
-    address: "355 Halfmoon Flats Road, West Glacier, MT 59936"
+    address: "West Glacier, MT 59936"
     occupants: [Family 1 & family]
     note: "Split lodging - Family 1 stays here"
 
-  - dates: ["2026-07-23", "2026-07-25"]
+  - id: airbnb-kalispell
+    dates: ["2026-07-23", "2026-07-25"]
     type: airbnb
     location: "Kalispell, MT"
-    address: "147 Cyclone Drive, Kalispell, MT 59901"
+    address: "Kalispell, MT 59901"
     occupants: [Family 2 & family, Family 3 & family]
     note: "Split lodging - Family 2 & Family 3 stay here"
 
-  - dates: ["2026-07-25", "2026-07-26"]
+  - id: drive-home
+    dates: ["2026-07-25", "2026-07-26"]
     type: none
     note: "Overnight drive home: West Glacier, MT -> Santa Clara, CA. No lodging."
 ```

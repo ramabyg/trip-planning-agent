@@ -15,6 +15,11 @@ from schemas import ChargingPlan
 MAPS_MCP_URL = "https://mapstools.googleapis.com/mcp"
 
 SPEC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "specs", "01-trip-context.md")
+# Private per-accommodation details (exact street addresses) live outside the
+# public repo — gitignored, but shipped with the deployed app. Keyed by the
+# accommodation `id` in the spec YAML. See specs/06-deployment.md.
+OVERRIDES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "specs", "trip-context-overrides.yaml")
 
 # Fixed facts from specs/01-trip-context.md
 TRIP_START = datetime.date(2026, 7, 18)
@@ -83,7 +88,9 @@ def get_maps_mcp_toolset(tool_filter: list | None = None):
 # --- Trip context (fixed facts) ---
 
 def _parse_context() -> dict:
-    """Parses the YAML block in specs/01-trip-context.md (the source of truth)."""
+    """Parses the YAML block in specs/01-trip-context.md (the source of truth),
+    then merges private per-accommodation overrides (exact addresses) when the
+    gitignored overrides file is present."""
     if not os.path.exists(SPEC_PATH):
         raise FileNotFoundError(f"Trip context spec not found at {SPEC_PATH}")
     with open(SPEC_PATH, "r", encoding="utf-8") as f:
@@ -91,7 +98,17 @@ def _parse_context() -> dict:
     match = re.search(r"```yaml\n(.*?)\n```", content, re.DOTALL)
     if not match:
         raise ValueError(f"No YAML block found in {SPEC_PATH}")
-    return yaml.safe_load(match.group(1))
+    context = yaml.safe_load(match.group(1))
+
+    if os.path.exists(OVERRIDES_PATH):
+        with open(OVERRIDES_PATH, "r", encoding="utf-8") as f:
+            overrides = yaml.safe_load(f) or {}
+        by_id = overrides.get("accommodations", {}) or {}
+        for acc in context.get("accommodations", []):
+            extra = by_id.get(acc.get("id"))
+            if extra:
+                acc.update(extra)
+    return context
 
 
 def trip_day_index(date: datetime.date) -> int:
@@ -708,12 +725,28 @@ def save_and_upload_trip_plan(day_index: int, day_title: str, plan_markdown: str
         blob = bucket.blob(filename)
         blob.upload_from_filename(local_path)
 
-        # Generate a signed URL valid for 24 hours
-        url = blob.generate_signed_url(
-            version="v4",
-            expiration=datetime.timedelta(hours=24),
-            method="GET",
-        )
+        # Generate a signed URL valid for 24 hours. On Cloud Run the runtime
+        # service account has no local private key, so fall back to signing
+        # via the IAM signBlob API (requires roles/iam.serviceAccountTokenCreator
+        # on itself — see specs/06-deployment.md).
+        try:
+            url = blob.generate_signed_url(
+                version="v4",
+                expiration=datetime.timedelta(hours=24),
+                method="GET",
+            )
+        except Exception:
+            from google import auth as google_auth
+            from google.auth.transport import requests as gauth_requests
+            credentials, _ = google_auth.default()
+            credentials.refresh(gauth_requests.Request())
+            url = blob.generate_signed_url(
+                version="v4",
+                expiration=datetime.timedelta(hours=24),
+                method="GET",
+                service_account_email=credentials.service_account_email,
+                access_token=credentials.token,
+            )
         return url
     except Exception as e:
         print(f"Error uploading plan to GCS: {e}")

@@ -85,6 +85,23 @@ git config core.hooksPath .githooks
   running unpatched code): start a **new session** in the UI or restart
   `adk web` — sessions are in-memory, so a restart clears the poisoned state.
 
+## Sharing & security (deployed app)
+
+See `specs/06-deployment.md` for the full design and runbook. Highlights:
+
+- **Per-family passwords** gate every route (login sets a signed, httpOnly
+  cookie; which password matched tells the agent who is prompting). Passwords,
+  API keys, and the cookie secret live in GCP Secret Manager (prod) or `.env`
+  (local — see `.env.example`); none of them appear in code, git history, or
+  logs (the flow log masks the GCS signed URL).
+- **Private addresses stay out of the public repo**: the committed
+  `specs/01-trip-context.md` carries city-level locations; exact addresses
+  live in the gitignored `specs/trip-context-overrides.yaml`, which deploys
+  with the app (`.gcloudignore` keeps it in the upload).
+- Cloud Run: single instance (in-memory sessions), `min-instances 0` normally
+  and `1` during the trip week; the ADK dev-ui is disabled in prod
+  (`SERVE_DEV_UI=0`).
+
 ## Status
 
 ✅ Phase 1a: conversational agent with a task-mode charging planner

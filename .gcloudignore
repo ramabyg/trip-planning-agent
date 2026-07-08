@@ -1,0 +1,21 @@
+# Controls what `gcloud run deploy --source .` uploads.
+# NOTE: this file exists deliberately — without it gcloud falls back to
+# .gitignore, which excludes specs/trip-context-overrides.yaml. That file
+# must ship with the app (private addresses) while staying out of git.
+.git/
+.gitignore
+.venv/
+.adk/
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+node_modules/
+tmp/
+tests/
+docs/
+.env
+.env.*
+.githooks/
+*.log
+.DS_Store
