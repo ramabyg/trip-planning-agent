@@ -64,6 +64,17 @@ class TestRootAgent:
         assert set(toolsets[0].tool_filter) == {"compute_routes", "search_places", "lookup_weather"}
 
 
+def test_flow_log_callbacks_attached_to_every_agent():
+    # The real-time terminal flow log must observe every agent's hops.
+    import flow_log
+    for llm_agent in (agent.root_agent, agent.charging_planner, agent.park_logistics):
+        assert llm_agent.before_agent_callback is flow_log.before_agent_callback
+        assert llm_agent.after_agent_callback is flow_log.after_agent_callback
+        assert llm_agent.before_model_callback is flow_log.before_model_callback
+        assert llm_agent.before_tool_callback is flow_log.before_tool_callback
+        assert llm_agent.after_tool_callback is flow_log.after_tool_callback
+
+
 def test_adk_task_streaming_patch_applied():
     # adk_patches works around a google-adk 2.3/2.4 bug where task delegation
     # under SSE streaming dispatches from a partial (unpersisted) event and

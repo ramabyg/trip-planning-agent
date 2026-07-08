@@ -61,6 +61,30 @@ Enable the pre-commit hook once per clone so failing checks block commits:
 git config core.hooksPath .githooks
 ```
 
+## Dev playground (`adk web`) notes
+
+- **Watching the flow live**: the terminal prints a hop-by-hop flow log
+  (agent runs, tool/MCP calls, Maps REST fan-out) for every prompt — see
+  `docs/architecture.md` §3 for the full "how to watch each hop" guide
+  (terminal log, dev-ui Events/Trace tabs, debug logging). Disable with
+  `FLOW_LOG=0`.
+- **Charging prompts take ~10–40 s end to end** (the deterministic planner
+  itself is 5–15 s of live Maps calls; the rest is LLM turns). The UI is
+  silent until the plan is narrated — let it finish rather than resubmitting
+  or refreshing mid-run.
+- **`adk_patches.py` must stay imported by `agent.py`.** It works around a
+  google-adk 2.3/2.4 bug where a task-mode delegation under SSE token
+  streaming dispatches from a partial (never-persisted) event, orphaning the
+  synthesized function response. Without it, every streamed charging prompt
+  fails with `ValueError: No function call event found for function responses
+  ids: {...}` and keeps failing on that session. Guarded by
+  `tests/unit/test_agent_wiring.py::test_adk_task_streaming_patch_applied`;
+  remove the patch only after the fix lands upstream (see the module
+  docstring for the mechanism and repro).
+- If a session ever shows that ValueError anyway (e.g., older server still
+  running unpatched code): start a **new session** in the UI or restart
+  `adk web` — sessions are in-memory, so a restart clears the poisoned state.
+
 ## Status
 
 ✅ Phase 1a: conversational agent with a task-mode charging planner

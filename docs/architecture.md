@@ -1,101 +1,95 @@
 # Architecture
 
-Status: draft — Phase 1 (conversational agent only)
+Status: current as of Phase 1 + Charging Planner v2 (2026-07). Matches the
+implemented code — update alongside `specs/` when behavior changes.
 
-## 1. High-level shape
+## 1. Components (as implemented)
 
-                      ┌─────────────────────────┐
-                      │   Orchestrator Agent     │
-                      │  (conversational, stateful│
-                      │   per session)            │
-                      └───────────┬───────────────┘
-                                  │
-        ┌─────────────┬──────────┼──────────────┬─────────────┐
-        ▼             ▼          ▼              ▼             ▼
-   trip-context   charging-   park-logistics   food-lookup    (future
-    data tool     planner       sub-agent       sub-agent     agents)
-  (static data)  sub-agent    (NPS, weather)   (MCP: Places)
-                 (Task mode)   (AgentTool)
-                (MCP: maps,
-                 charger APIs)
+| Component | Kind | Model | Responsibility | Code |
+|---|---|---|---|---|
+| `root_agent` | LlmAgent, chat mode | gemini-3.5-flash | Conversation state, grounding, routing, narration | `agent.py` |
+| `charging_planner` | LlmAgent, **task mode** (`mode="task"`, `output_schema=ChargingPlan`) | gemini-3.1-pro-preview | Tesla charging plans; single tool wraps the whole deterministic algorithm | `agent.py`, `tools.plan_charging_route` |
+| `park_logistics` | LlmAgent wrapped as **AgentTool** | gemini-3.5-flash | Park weather + NPS alerts + hike suggestions | `agent.py` |
+| `get_trip_context` | plain Python tool | — | Fixed trip facts from `specs/01-trip-context.md` (dates, lodging, group splits) | `tools.py` |
+| `save_and_upload_trip_plan` | plain Python tool | — | Markdown itinerary → GCS signed URL | `tools.py` |
+| Maps **MCP** toolset | `McpToolset` (streamable HTTP, `mapstools.googleapis.com/mcp`) | — | `compute_routes` / `search_places` / `lookup_weather` for LLM agents, scoped per agent via `tool_filter` | `tools.get_maps_mcp_toolset` |
+| Maps **REST** client | direct HTTP (no LLM, no MCP) | — | Routes v2, Elevation, Places EV/amenity search used by the deterministic planner | `maps_client.py` |
+| NPS API | direct HTTP with mock fallback | — | Park alerts (`source: live|mock`) | `tools.get_nps_alerts` |
+
+Two distinct Maps paths on purpose: LLM agents use the **MCP toolset** (the
+model decides calls); the charging algorithm uses the **REST client** in
+plain Python so identical inputs always give identical plans.
+
+## 2. Anatomy of one charging prompt
+
+"We're at 70% leaving Driggs for West Yellowstone — do we need to charge?"
+
+```mermaid
+sequenceDiagram
+    participant U as User (dev-ui)
+    participant S as FastAPI /run_sse
+    participant R as root_agent (flash)
+    participant CP as charging_planner (pro, task scope)
+    participant M as Maps REST / MCP
+
+    U->>S: prompt (SSE)
+    S->>R: invocation
+    R->>R: LLM turn 1
+    R->>M: get_trip_context / MCP tools as needed
+    R->>CP: task FC: charging_planner(origin, destination, current_soc)
+    Note over CP: dispatched by the workflow wrapper<br/>isolation_scope = FC id (own event history)
+    CP->>CP: LLM turn: call the one tool
+    CP->>M: plan_charging_route → computeRoutes + elevation +<br/>places EV search + amenity search (5-15 s fan-out)
+    CP->>CP: LLM turn: finish_task(plan)
+    CP-->>R: synthesized task FR (the ChargingPlan)
+    R->>R: LLM turn 2: narrate the structured plan
+    R-->>U: streamed answer
 ```
 
-The orchestrator is the root conversational agent. It coordinates sub-agents and tools to answer user queries:
+Key mechanics:
+- **Task delegation** is a function call whose name is the sub-agent's name.
+  The workflow wrapper dispatches the sub-agent with `isolation_scope = FC id`
+  so its internal events (its own LLM turns, `plan_charging_route`,
+  `finish_task`) are invisible to the root's context, and synthesizes a
+  function *response* carrying the structured output back to the root.
+- Every FC must have a paired FR in the same scope, or context rebuilding
+  fails ("No function call event found..."). `adk_patches.py` works around a
+  google-adk 2.3/2.4 bug where, under SSE token streaming, the wrapper
+  dispatched from a *partial* (never-persisted) event and broke that pairing.
+- `park_logistics` is the other pattern (**AgentTool**): a normal tool call
+  that runs a whole sub-agent inline and returns its text.
 
-1. Reads fixed trip context (via `trip-context` tool) to know where we are
-   in the trip (date, current/next accommodation, group split status).
-2. Determines which sub-agent(s) or tools are relevant to the question.
-3. Invokes the sub-agent(s) via Task Delegation or AgentTool, which call MCP servers for live data.
-4. Synthesizes a single answer, scoped to "today" or the specific question
-   — never silently re-planning the whole 8-day trip.
+## 3. Watching it work in real time
 
-## 2. Multi-Agent Boundaries
-
-**Sub-agents** = intelligent, specialized agents with focused instructions, constraints, and tools. They perform task routing or return structured information.
-
-**Orchestrator** = the root agent that holds conversational state, delegates tasks to sub-agents, and merges/synthesizes their outputs.
-
-| Component | Type | Responsibility |
+| Surface | What you see | How |
 |---|---|---|
-| trip-context | Tool (static) | Source of truth for bookings/dates/group |
-| charging-planner | Sub-agent (Task Mode) | Tesla range/charging logic and Supercharger routing |
-| park-logistics | Sub-agent (AgentTool) | NPS road/trail status, weather-aware hike suggestions |
-| food-lookup | Sub-agent/Tool | Restaurant search en route (Google Places) |
-| Orchestrator | Root Agent | Coordinates sub-agents, routes queries, keeps "today" state |
+| **Terminal flow log** | One line per hop, live: `>> [root_agent] run started`, `-> tool get_trip_context({...})`, `>> [charging_planner] run started`, `maps REST computeRoutes ...` | On by default (`flow_log.py`); disable with `FLOW_LOG=0` |
+| **dev-ui Events tab** | Every persisted event: each FC with full args (this is where a wrong `current_soc` is visible), each FR with the full result | `/dev-ui` → pick session → Events |
+| **dev-ui Trace tab** | Span waterfall per prompt: `invocation → agent_run → call_llm / execute_tool`, with latencies | `/dev-ui` → Trace |
+| **Wire-level logs** | Full request/response internals | `logging.getLogger("google_adk").setLevel(logging.DEBUG)` in `main.py` (verbose) |
+| **Evals** | Regression-grade behavior checks (grounding, delegation, disclosure) | `pytest -m eval` |
 
-## 3. MCP servers (Phase 1 candidates)
+Debugging recipe for a suspicious answer: find the prompt in **Events**, read
+the task FC args (did the root pass sane inputs?), then the FR (did the
+deterministic plan already contain the problem, or did narration distort
+it?), then Trace for where time went. The terminal flow log gives you the
+same story live without clicking.
 
-| MCP server | Purpose | Notes |
-|---|---|---|
-| Maps/Routing (e.g. Google Maps) | Drive time, traffic, route polylines | Needed by charging + food sub-agents |
-| Weather (NWS/NOAA or similar) | Current + short-term forecast | Needed by park-logistics sub-agent |
-| NPS data | Road/trail status, alerts | NPS publishes a public API; need to verify current alert granularity |
-| Tesla | Live SOC/location (optional) | Community MCP servers exist; could also start with manual "current battery %" input from the user rather than live telemetry, to reduce auth complexity in Phase 1 |
-| Google Places | Restaurant search en route | Already used in our other tooling patterns |
+## 4. Guardrails encoded in the planner
 
-**Phase 1 simplification**: Tesla live telemetry is the highest-effort,
-highest-auth-complexity integration. Recommend starting with the user
-manually reporting battery % and location in chat, and only build the
-Tesla MCP integration once the rest of the pipeline (charging-planner
-sub-agent logic, MCP plumbing pattern) is proven out with the other servers.
+- Consumption is elevation-adaptive per ~5-mile chunk (280 Wh/mi base,
+  +7 Wh/m climb, −2.8 Wh/m descent credit = conservative 40% regen).
+- Charge targets: 80% default, stretched up to a **hard 95% cap**; a stop
+  where the car arrives above target becomes "No charging needed" —
+  targets never exceed 95 even when departing at 100%.
+- `current_soc` inputs are validated to 10–100; the root agent must ask for
+  the battery level rather than assume one.
+- Chargers: ≥100 kW CCS/Tesla (50 kW fallback with a warning note), live
+  availability filtering, amenity-preferred ranking, 10% arrival buffer.
 
-## 4. Data flow example
+## 5. SDD tie-in
 
-**User**: "We're leaving Gardiner now, 70% battery, heading toward
-Glacier today — where should we charge and is there anything worth
-stopping for?"
-
-1. Orchestrator → `trip-context` tool: confirms today is a transition day
-   (Gardiner → West Glacier KOA), checks group-split note (not yet in
-   effect until Jul 23).
-2. Orchestrator → `charging-planner` sub-agent: given start location, 70%
-   battery, destination → calls Maps MCP for route, evaluates whether a
-   Supercharger stop is needed en route or arrival SOC is sufficient.
-3. Orchestrator → `park-logistics` sub-agent: checks if route passes near any
-   open trails/viewpoints worth a stop, using NPS + Weather MCP.
-4. Orchestrator merges: one answer — charging stop (if needed) + 1-2
-   worthwhile stops — scoped to today only.
-
-## 5. SDD workflow tie-in
-
-Each row in the component table above gets its own spec before code:
-- `specs/01-trip-context.md` ✅ drafted
-- `specs/02-charging-agent.md` — next
-- `specs/03-park-logistics.md` — next
-- `specs/04-orchestrator.md` — next
-
-Architecture changes (e.g. adding a subagent layer in Phase 2) should be
-reflected here and cross-referenced from the relevant spec.
-
-## 6. Open questions
-
-- Which Maps/routing provider — Google Maps API vs. another option?
-  (Affects MCP server choice and Supercharger-aware routing quality.)
-- NPS API — confirm current alert/closure data granularity before relying
-  on it for trail decisions.
-- Tesla integration approach — community MCP vs. manual input vs. Tesla's
-  own API (requires OAuth app registration) — needs a decision before
-  `02-charging-agent.md` can be finalized.
-- Where does the orchestrator run day-to-day during the actual trip —
-  Claude Code on a laptop, Claude.ai chat, or something else? Affects how
-  "current location/time" gets into context each turn.
+Specs are the source of truth; this doc is the map between them and code:
+`specs/01-trip-context.md` (fixed facts) · `specs/02-charging-agent.md`
+(planner v2 algorithm) · `specs/05-testing.md` (test strategy). Architecture
+changes must update this file and the relevant spec together.

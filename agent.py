@@ -1,5 +1,6 @@
 import dotenv
 import adk_patches  # noqa: F401  (workaround for ADK streaming/task-mode bug)
+import flow_log
 import tools
 from google.adk.agents import LlmAgent
 from google.adk.tools import AgentTool
@@ -11,6 +12,15 @@ dotenv.load_dotenv()
 
 # Low temperature everywhere: planning answers must be reproducible run-to-run.
 LOW_TEMP_CONFIG = genai_types.GenerateContentConfig(temperature=0.1)
+
+# Real-time hop-by-hop terminal log (see flow_log.py; disable with FLOW_LOG=0).
+FLOW_CALLBACKS = dict(
+    before_agent_callback=flow_log.before_agent_callback,
+    after_agent_callback=flow_log.after_agent_callback,
+    before_model_callback=flow_log.before_model_callback,
+    before_tool_callback=flow_log.before_tool_callback,
+    after_tool_callback=flow_log.after_tool_callback,
+)
 
 # --- Charging Planner Sub-agent (Task Mode, structured output) ---
 
@@ -40,6 +50,7 @@ charging_planner = LlmAgent(
           inventing a plan.
     """,
     tools=[tools.plan_charging_route],
+    **FLOW_CALLBACKS,
 )
 
 # --- Park Logistics Sub-agent (AgentTool Mode) ---
@@ -74,7 +85,8 @@ park_logistics = LlmAgent(
     tools=[
         tools.get_maps_mcp_toolset(tool_filter=['lookup_weather']),
         tools.get_nps_alerts
-    ]
+    ],
+    **FLOW_CALLBACKS,
 )
 
 # --- Root Orchestrator Agent ---
@@ -121,6 +133,9 @@ root_agent = LlmAgent(
            Family 1 drives a Tesla EV; Family 2 and Family 3 drive gas cars.
            - Family 1's drives: call `request_task_charging_planner` for structured charging segments.
            - Family 2/3's drives: use `compute_routes` directly; they do not need charging stops.
+           - NEVER assume the Tesla's battery level. If the user has not stated the current
+             SOC for the drive in question (in this or an earlier message), ASK for it before
+             delegating to the charging planner. Valid SOC range is 10-100.
 
         4. Group Splits:
            On July 23-25 the group splits: Family 1 at West Glacier NP KOA; Family 2 and
@@ -144,5 +159,6 @@ root_agent = LlmAgent(
         tools.get_trip_context,
         tools.save_and_upload_trip_plan,
         tools.get_maps_mcp_toolset(tool_filter=['compute_routes', 'search_places', 'lookup_weather'])
-    ]
+    ],
+    **FLOW_CALLBACKS,
 )
