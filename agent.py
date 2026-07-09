@@ -56,7 +56,9 @@ charging_planner = LlmAgent(
 # --- Park Logistics Sub-agent (AgentTool Mode) ---
 
 park_logistics = LlmAgent(
-    model='gemini-2.5-flash-lite',  # cost experiment (2026-07-08): ~15x cheaper than 3.5-flash; swap back before sharing with the families if quality dips
+    model='gemini-2.5-flash-lite',  # cost experiment (2026-07-08): ~15x cheaper than 3.5-flash.
+    # Safe here (agent-as-a-tool, plain tools only) — unlike the root agent, where
+    # flash-lite's parallel tool calls break task-mode delegation; see root_agent below.
     name='park_logistics',
     description="Checks weather forecasts and NPS road/trail status alerts for parks. Takes park_name.",
     generate_content_config=LOW_TEMP_CONFIG,
@@ -92,7 +94,10 @@ park_logistics = LlmAgent(
 # --- Root Orchestrator Agent ---
 
 root_agent = LlmAgent(
-    model='gemini-2.5-flash-lite',  # cost experiment (2026-07-08): ~15x cheaper than 3.5-flash; swap back before sharing with the families if quality dips
+    # NOT gemini-2.5-flash-lite: it parallel-calls get_trip_context alongside the
+    # charging_planner task tool, and ADK's task-delegation wrapper drops the sibling
+    # call (orphaned FC -> empty final response). Caught by `pytest -m eval`.
+    model='gemini-3.5-flash',
     name='root_agent',
     generate_content_config=LOW_TEMP_CONFIG,
     instruction="""

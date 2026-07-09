@@ -67,11 +67,15 @@ Two eval sets, each with its own `test_config.json` criteria:
 | `tests/eval/grounding/` | lodging + group split questions for Jul 20 / Jul 23 | `tool_trajectory_avg_score: 1.0`, `final_response_match_v2: 0.7` | fixed facts: the exact `get_trip_context(date=...)` call and the answer are both deterministic |
 | `tests/eval/delegation/` | Tesla charging question (Driggs → West Yellowstone), Many Glacier road status | `final_response_match_v2: 0.7` | routes through sub-agents are path-dependent, so no trajectory pinning; the LLM judge grades the final answer against a reference. The park case also verifies the simulated-data disclosure rule (no `NPS_API_KEY` → mock alerts). |
 
-`final_response_match_v2` is an LLM-as-judge metric. The judge model is ADK's
-built-in default (`gemini-2.5-flash` as of google-adk 2.4 — unrelated to the
-agent models in `agent.py`, which are `gemini-3.5-flash` / `gemini-3.1-pro-preview`).
-Chosen over ROUGE-based `response_match_score` because answers legitimately
-vary in phrasing and include live route numbers.
+`final_response_match_v2` is an LLM-as-judge metric. The judge model is
+**pinned to `gemini-3.5-flash`** via `judge_model_options` in each
+`test_config.json` — ADK 2.4's built-in default (`gemini-2.5-flash`) 404s for
+newer API keys ("no longer available to new users"), and pinning also keeps
+the judge independent of the agent models in `agent.py` (currently
+`gemini-3.5-flash` root, `gemini-2.5-flash-lite` park logistics,
+`gemini-3.1-pro-preview` charging planner). Chosen over ROUGE-based
+`response_match_score` because
+answers legitimately vary in phrasing and include live route numbers.
 
 Cost policy: each case is one full agent run plus judge calls (`num_runs=1`).
 Evals run **on demand only** (`pytest -m eval`) — never in the commit gate,
