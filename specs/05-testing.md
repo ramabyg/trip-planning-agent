@@ -72,8 +72,7 @@ Two eval sets, each with its own `test_config.json` criteria:
 `test_config.json` — ADK 2.4's built-in default (`gemini-2.5-flash`) 404s for
 newer API keys ("no longer available to new users"), and pinning also keeps
 the judge independent of the agent models in `agent.py` (currently
-`gemini-3.5-flash` root, `gemini-2.5-flash-lite` park logistics,
-`gemini-3.1-pro-preview` charging planner). Chosen over ROUGE-based
+`gemini-3.5-flash` across all three agents). Chosen over ROUGE-based
 `response_match_score` because
 answers legitimately vary in phrasing and include live route numbers.
 

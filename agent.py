@@ -25,7 +25,9 @@ FLOW_CALLBACKS = dict(
 # --- Charging Planner Sub-agent (Task Mode, structured output) ---
 
 charging_planner = LlmAgent(
-    model='gemini-3.1-pro-preview',
+    model='gemini-3.5-flash',  # all agents on 3.5-flash for the pre-trip test week (2026-07-09);
+    # pro was overkill here — the math lives in plan_charging_route, the LLM only
+    # extracts args and narrates — and previews carry retirement risk during the trip.
     name='charging_planner',
     mode='task',
     description="Plans charging stops and segments for EV driving routes. Takes origin, destination, and current_soc.",
@@ -56,9 +58,8 @@ charging_planner = LlmAgent(
 # --- Park Logistics Sub-agent (AgentTool Mode) ---
 
 park_logistics = LlmAgent(
-    model='gemini-2.5-flash-lite',  # cost experiment (2026-07-08): ~15x cheaper than 3.5-flash.
-    # Safe here (agent-as-a-tool, plain tools only) — unlike the root agent, where
-    # flash-lite's parallel tool calls break task-mode delegation; see root_agent below.
+    model='gemini-3.5-flash',  # cost experiment (flash-lite) ended 2026-07-09: one model
+    # everywhere for the pre-trip test week; revisit after the trip if cost matters.
     name='park_logistics',
     description="Checks weather forecasts and NPS road/trail status alerts for parks. Takes park_name.",
     generate_content_config=LOW_TEMP_CONFIG,

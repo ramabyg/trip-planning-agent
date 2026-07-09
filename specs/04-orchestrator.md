@@ -20,7 +20,7 @@ Specifies the behavior of the conversational **Orchestrator Agent** (the Root Ag
 - **Name**: `root_agent`
 - **Model**: `gemini-3.5-flash`
 - **Sub-agents**:
-  - `charging_planner` (registered as a task sub-agent; model `gemini-3.1-pro-preview`)
+  - `charging_planner` (registered as a task sub-agent; model `gemini-3.5-flash`)
 - **Tools**:
   - `AgentTool(park_logistics)` (wrapped sub-agent; model `gemini-3.5-flash`)
   - `tools.get_trip_context`

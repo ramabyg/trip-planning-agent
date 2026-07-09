@@ -8,7 +8,7 @@ implemented code — update alongside `specs/` when behavior changes.
 | Component | Kind | Model | Responsibility | Code |
 |---|---|---|---|---|
 | `root_agent` | LlmAgent, chat mode | gemini-3.5-flash | Conversation state, grounding, routing, narration | `agent.py` |
-| `charging_planner` | LlmAgent, **task mode** (`mode="task"`, `output_schema=ChargingPlan`) | gemini-3.1-pro-preview | Tesla charging plans; single tool wraps the whole deterministic algorithm | `agent.py`, `tools.plan_charging_route` |
+| `charging_planner` | LlmAgent, **task mode** (`mode="task"`, `output_schema=ChargingPlan`) | gemini-3.5-flash | Tesla charging plans; single tool wraps the whole deterministic algorithm | `agent.py`, `tools.plan_charging_route` |
 | `park_logistics` | LlmAgent wrapped as **AgentTool** | gemini-3.5-flash | Park weather + NPS alerts + hike suggestions | `agent.py` |
 | `get_trip_context` | plain Python tool | — | Fixed trip facts from `specs/01-trip-context.md` (dates, lodging, group splits) | `tools.py` |
 | `save_and_upload_trip_plan` | plain Python tool | — | Markdown itinerary → GCS signed URL | `tools.py` |
