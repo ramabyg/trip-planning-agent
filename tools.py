@@ -103,11 +103,24 @@ def _parse_context() -> dict:
     if os.path.exists(OVERRIDES_PATH):
         with open(OVERRIDES_PATH, "r", encoding="utf-8") as f:
             overrides = yaml.safe_load(f) or {}
+        # Accommodations: matched by stable `id` (e.g. exact street addresses).
         by_id = overrides.get("accommodations", {}) or {}
         for acc in context.get("accommodations", []):
             extra = by_id.get(acc.get("id"))
             if extra:
                 acc.update(extra)
+        # Group entries: matched by family `name` (real names, flights, phones).
+        by_name = overrides.get("group", {}) or {}
+        for member in (context.get("trip", {}) or {}).get("group", []):
+            extra = by_name.get(member.get("name"))
+            if extra:
+                member.update(extra)
+        # Trip-level scalars/new keys (e.g. emergency contact). `group` is
+        # handled above and must not be clobbered wholesale.
+        trip_extra = dict(overrides.get("trip", {}) or {})
+        trip_extra.pop("group", None)
+        if trip_extra and isinstance(context.get("trip"), dict):
+            context["trip"].update(trip_extra)
     return context
 
 
@@ -169,6 +182,7 @@ def get_trip_context(date: str) -> dict:
 
     result["trip"] = context.get("trip")
     result["accommodations"] = context.get("accommodations")
+    result["preferences"] = context.get("preferences")
     return result
 
 

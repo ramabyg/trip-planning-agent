@@ -10,6 +10,8 @@ Defines the **fixed, unchangeable** trip data that every other agent treats as g
 - Group composition (families, cars, travel methods).
 - Accommodation bookings (dates, location, address, who's staying where).
 - Known hard constraints (e.g., intentional group split, shared vs. split accommodations, overnight drive).
+- Planning preferences the agents must honor in every day plan: daily rules
+  (one moderate hike, lunch on the go) and per-park must-see lists.
 
 ## Data Model
 
@@ -88,6 +90,27 @@ accommodations:
     dates: ["2026-07-25", "2026-07-26"]
     type: none
     note: "Overnight drive home: West Glacier, MT -> Santa Clara, CA. No lodging."
+
+preferences:
+  daily:
+    - "At least one moderate hike every day (kid-friendly; kids in the group are 8-13)"
+    - "Lunch on the go — grab-and-go food near the trailhead or route, no sit-down lunches"
+  must_see:
+    grand_teton:
+      - "Jenny Lake + Cascade Canyon (boat shuttle across; good daily moderate hike)"
+      - "Schwabacher Landing / Snake River Overlook (sunrise, quick stop)"
+      - "Mormon Row barns"
+    yellowstone:
+      - "Old Faithful + Upper Geyser Basin boardwalk"
+      - "Grand Prismatic via Fairy Falls overlook trail (moderate hike option)"
+      - "Grand Canyon of the Yellowstone — Artist Point + rim trail"
+      - "Lamar or Hayden Valley wildlife drive (early morning)"
+      - "Mammoth Hot Springs terraces (near the Gardiner base)"
+    glacier:
+      - "Going-to-the-Sun Road + Logan Pass"
+      - "Avalanche Lake via Trail of the Cedars (moderate hike option)"
+      - "Lake McDonald"
+      - "Many Glacier valley (NOTE: timed-entry permit required 6am-3pm)"
 ```
 
 ## Outputs this Spec Provides to Other Agents
@@ -97,6 +120,8 @@ accommodations:
 - `trip_day_index(date)` → day of the 8-day trip (1 to 8).
 - `timezone_for_location(location)` → returns "PT" or "MT" based on state/location coordinates.
 - Hard constraints list (e.g., no lodging on the night of July 25th due to the overnight drive home).
+- `preferences` (daily planning rules + per-park must-see lists) — returned by
+  `get_trip_context` so day plans honor them without re-prompting.
 
 ## Edge Cases / Decision Rules
 

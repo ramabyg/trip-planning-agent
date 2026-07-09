@@ -33,6 +33,38 @@ class TestTripContextOverrides:
         context = tools._parse_context()
         assert all(a.get("id") for a in context["accommodations"])
 
+    def test_group_overrides_merge_by_family_name(self, tmp_path, monkeypatch):
+        overlay = tmp_path / "overrides.yaml"
+        overlay.write_text(
+            "group:\n"
+            '  "Family 2":\n'
+            '    flight_arrival: "UA1234 SFO->JAC 2026-07-18 11:05 MT"\n'
+            '    members: "Test Names"\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(tools, "OVERRIDES_PATH", str(overlay))
+        context = tools._parse_context()
+        by_name = {g["name"]: g for g in context["trip"]["group"]}
+        assert by_name["Family 2"]["flight_arrival"].startswith("UA1234")
+        assert by_name["Family 2"]["members"] == "Test Names"
+        # Untouched families keep committed values and gain nothing.
+        assert "flight_arrival" not in by_name["Family 1"]
+
+    def test_trip_overrides_shallow_merge_protects_group(self, tmp_path, monkeypatch):
+        overlay = tmp_path / "overrides.yaml"
+        overlay.write_text(
+            "trip:\n"
+            '  emergency_contact: "555-0100"\n'
+            '  group: "must-not-clobber"\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(tools, "OVERRIDES_PATH", str(overlay))
+        context = tools._parse_context()
+        assert context["trip"]["emergency_contact"] == "555-0100"
+        # `group` in the trip overlay is ignored — the list survives intact.
+        assert isinstance(context["trip"]["group"], list)
+        assert len(context["trip"]["group"]) == 3
+
 
 class TestFlowLogMasking:
     def _capture(self, monkeypatch):

@@ -64,6 +64,15 @@ class TestRootAgent:
         assert set(toolsets[0].tool_filter) == {"compute_routes", "search_places", "lookup_weather"}
 
 
+def test_root_honors_planning_preferences():
+    # Day plans must bake in the family's fixed preferences from
+    # get_trip_context (specs/01-trip-context.md `preferences` section).
+    instruction = agent.root_agent.instruction
+    assert "ONE moderate" in instruction
+    assert "grab-and-go" in instruction
+    assert "must_see" in instruction
+
+
 def test_root_grounds_on_prompting_family():
     # Deployed UI tags every session with "Prompting family: Family N"; the
     # root agent must use it (and ask when it's absent) and must never send

@@ -56,7 +56,7 @@ charging_planner = LlmAgent(
 # --- Park Logistics Sub-agent (AgentTool Mode) ---
 
 park_logistics = LlmAgent(
-    model='gemini-3.5-flash',
+    model='gemini-2.5-flash-lite',  # cost experiment (2026-07-08): ~15x cheaper than 3.5-flash; swap back before sharing with the families if quality dips
     name='park_logistics',
     description="Checks weather forecasts and NPS road/trail status alerts for parks. Takes park_name.",
     generate_content_config=LOW_TEMP_CONFIG,
@@ -92,7 +92,7 @@ park_logistics = LlmAgent(
 # --- Root Orchestrator Agent ---
 
 root_agent = LlmAgent(
-    model='gemini-3.5-flash',
+    model='gemini-2.5-flash-lite',  # cost experiment (2026-07-08): ~15x cheaper than 3.5-flash; swap back before sharing with the families if quality dips
     name='root_agent',
     generate_content_config=LOW_TEMP_CONFIG,
     instruction="""
@@ -104,7 +104,7 @@ root_agent = LlmAgent(
         Your tools:
         1. `get_trip_context`: pass the date in question (YYYY-MM-DD) to get the trip day index,
            that night's lodging, and whether the families are together or split.
-        2. `request_task_charging_planner`: delegates to the charging planner sub-agent for
+        2. `charging_planner`: delegates to the charging planner sub-agent for
            Family 1's Tesla Model Y. Provide origin, destination, and current battery SOC.
            It returns a structured plan with drive segments, fast-charging stops
            (Tesla or CCS networks), charge times, and nearby amenities at each stop.
@@ -142,13 +142,25 @@ root_agent = LlmAgent(
            group starts/ends on the date in question, and whether they are split.
            Never hallucinate accommodation details. If the user asks about lodging, look it up.
 
+        1b. Planning Preferences (from `get_trip_context`'s `preferences` field):
+           When planning a day (or suggesting activities), honor these without being asked:
+           - Include exactly ONE moderate, kid-friendly hike per day. Prefer hikes from the
+             `must_see` list that fit that day's base/route; say roughly how long it takes.
+           - Lunch is always grab-and-go near the trailhead or route — never plan a sit-down
+             lunch. Use `search_places` for concrete pickup options when asked.
+           - Weave in `must_see` items that are near that day's base or driving route, and
+             surface any constraint noted on them (e.g., Many Glacier timed-entry permit).
+           - NEVER abandon a planning request because one tool fails or has no data
+             (e.g., weather beyond the 10-day forecast window): note the gap in one
+             sentence and deliver the rest of the day plan anyway.
+
         2. Time Zone Awareness:
            Santa Clara is in Pacific Time; the Idaho/Wyoming/Montana destinations are in
            Mountain Time. Highlight the 1-hour shift when a drive crosses between them.
 
         3. Vehicle Differences:
            Family 1 drives a Tesla EV; Family 2 and Family 3 drive gas cars.
-           - Family 1's drives: call `request_task_charging_planner` for structured charging segments.
+           - Family 1's drives: call the `charging_planner` tool for structured charging segments.
            - Family 2/3's drives: use `compute_routes` directly; they do not need charging stops.
            - NEVER assume the Tesla's battery level. If the user has not stated the current
              SOC for the drive in question (in this or an earlier message), ASK for it before

@@ -49,17 +49,23 @@ in the served pages**.
 
 - `specs/01-trip-context.md` (committed, public) carries **city-level**
   locations only; every accommodation has a stable `id`.
-- `specs/trip-context-overrides.yaml` (**gitignored**, never on GitHub) maps
-  accommodation `id` → exact street address. `tools._parse_context()` merges
-  it when present. The deploy source upload includes it (`.gcloudignore`
-  does not exclude it), so the hosted agent uses real addresses.
-- Format:
+- `specs/trip-context-overrides.yaml` (**gitignored**, never on GitHub) holds
+  the real values behind the committed placeholders. `tools._parse_context()`
+  merges it when present. The deploy source upload includes it
+  (`.gcloudignore` does not exclude it), so the hosted agent uses actuals.
+- Format (three sections, all optional):
 
   ```yaml
   # specs/trip-context-overrides.yaml — DO NOT COMMIT
-  accommodations:
+  accommodations:          # matched by accommodation `id`; any field
     airbnb-driggs:
       address: "123 Example St, Driggs, ID 83422"
+  group:                   # matched by family `name` in trip.group; any field
+    "Family 2":
+      members: "real first names & ages"
+      flight_arrival: "UA1234 SFO->JAC 2026-07-18 11:05 MT"
+  trip:                    # shallow update of trip-level keys (except group)
+    emergency_contact: "..."
   ```
 
 ## Secret inventory (names only — values in Secret Manager / local .env)

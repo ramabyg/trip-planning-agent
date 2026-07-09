@@ -9,7 +9,8 @@ Specifies the behavior of the conversational **Orchestrator Agent** (the Root Ag
 - Maintains conversational history in a chat session.
 - Exposes tools to retrieve static trip context and upload planned itineraries.
 - Registers sub-agents to handle specialized logistics:
-  - Invokes `charging_planner` in **Task Mode** via `request_task_charging_planner`.
+  - Invokes `charging_planner` in **Task Mode** via the `charging_planner` task tool
+    (ADK names the delegation tool after the sub-agent).
   - Invokes `park_logistics` in **Agent-as-a-Tool Mode** via its wrapped tool.
 - Handles user intent routing, sub-agent invocation, and result aggregation.
 - Synchronizes final plans by saving markdown itineraries to Google Cloud Storage (GCS).
@@ -49,7 +50,7 @@ Specifies the behavior of the conversational **Orchestrator Agent** (the Root Ag
 
 2. **Intent Parsing & Sub-agent Delegation**:
    - **Charging/Routing**: If the query involves driving range, battery state, routing, or charging locations:
-     - Call the `request_task_charging_planner` tool passing `origin`, `destination`, and `current_soc`.
+     - Call the `charging_planner` tool passing `origin`, `destination`, and `current_soc`.
    - **Park Alerts/Weather**: If the query asks about road status, trail closures, hikes, or weather forecasts:
      - Call the `park_logistics` tool passing the relevant `park_name`.
    - **Food/Restaurants**: If the query asks for dining options:

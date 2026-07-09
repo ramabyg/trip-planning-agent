@@ -96,7 +96,7 @@ The search samples the route polyline at energy-budget fractions (0.95, 0.8, 0.6
 
 ## Inputs (Task Arguments)
 
-The sub-agent accepts the following inputs when invoked via the orchestrator's `request_task_charging_planner` tool:
+The sub-agent accepts the following inputs when invoked via the orchestrator's `charging_planner` task tool (ADK names the delegation tool after the sub-agent):
 
 - `origin`: Starting location (address, coordinates, or Place ID).
 - `destination`: Ending location (address, coordinates, or Place ID).

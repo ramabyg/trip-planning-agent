@@ -24,6 +24,17 @@ class TestTripDayIndex:
             tools.trip_day_index(date)
 
 
+class TestPreferences:
+    def test_get_trip_context_returns_preferences(self):
+        result = tools.get_trip_context("2026-07-21")
+        prefs = result["preferences"]
+        assert prefs, "preferences must flow through get_trip_context"
+        assert any("hike" in rule.lower() for rule in prefs["daily"])
+        assert any("lunch" in rule.lower() for rule in prefs["daily"])
+        assert set(prefs["must_see"]) == {"grand_teton", "yellowstone", "glacier"}
+        assert all(prefs["must_see"][park] for park in prefs["must_see"])
+
+
 class TestCurrentBase:
     def test_shared_night_in_driggs(self):
         bases = tools.current_base(D(2026, 7, 19))
